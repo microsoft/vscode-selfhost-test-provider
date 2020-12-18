@@ -1,7 +1,4 @@
-on:
-  push:
-    tags:
-      - '*'
+on: [push]
 
 name: Release Extension
 jobs:
@@ -15,6 +12,6 @@ jobs:
           node-version: ^12
       - run: npm ci
       - run: npm i -g vsce
-      - run: vsce publish -p $VSCE_TOKEN
+      - run: vsce publish -p $VSCE_TOKEN --noVerify
         env:
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
