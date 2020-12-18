@@ -1,8 +1,8 @@
 on: [push, pull_request]
 
-name: Release Extension
+name: Verify
 jobs:
-  deploy:
+  verify:
     runs-on: ubuntu-latest
 
     steps:
