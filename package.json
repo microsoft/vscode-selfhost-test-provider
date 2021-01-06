@@ -14,7 +14,6 @@
 	"activationEvents": [
 		"workspaceContains:src/vs/loader.js"
 	],
-	"license": "MIT",
 	"main": "./dist/extension.js",
 	"prettier": {
 		"printWidth": 100,
@@ -22,6 +21,16 @@
 		"tabWidth": 2,
 		"arrowParens": "avoid"
 	},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/vscode-selfhost-test-provider.git"
+  },
+  "author": "Connor Peet <connor@peet.io>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/microsoft/vscode-selfhost-test-provider/issues"
+  },
+  "homepage": "https://github.com/microsoft/vscode-selfhost-test-provider#readme",
 	"scripts": {
 		"vscode:prepublish": "npm run package",
 		"compile": "webpack --config ./build/node-extension.webpack.config.js",

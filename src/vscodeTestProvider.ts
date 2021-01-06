@@ -11,15 +11,18 @@ import {
   Position,
   Range,
   RelativePattern,
+  TestMessage,
   TestProvider,
   TestRunOptions,
   TestRunState,
   TestState,
+  TextDocument,
   Uri,
   window,
   workspace,
   WorkspaceFolder,
 } from 'vscode';
+import { debounce } from './debounce';
 import { MochaEvent, TestOutputScanner } from './testOutputScanner';
 import { TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
 import { PlatformTestRunner } from './vscodeTestRunner';
@@ -32,6 +35,9 @@ const MAX_BLOCKING_TARGET = 0.5;
 export class VscodeTestProvider implements TestProvider<VSCodeTest> {
   private outputChannel?: OutputChannel;
 
+  /**
+   * @inheritdoc
+   */
   public createWorkspaceTestHierarchy(workspaceFolder: WorkspaceFolder) {
     const root = new TestRoot(workspaceFolder);
     const pattern = new RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
@@ -42,47 +48,82 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
     watcher.onDidChange(async uri => await updateTestsInFile(root, uri, changeTestEmitter));
     watcher.onDidDelete(uri => removeTestsForFile(root, uri, changeTestEmitter));
 
-    const onDidDiscoverInitialTests = new EventEmitter<void>();
-    workspace
-      .findFiles(pattern)
-      .then(async files => {
-        const workers: Promise<void>[] = [];
-        const startedAt = Date.now();
-        let totalProcessedTime = 0;
+    const discoveredInitialTests = workspace.findFiles(pattern).then(async files => {
+      const workers: Promise<void>[] = [];
+      const startedAt = Date.now();
+      let totalProcessedTime = 0;
 
-        for (let i = 0; i < 4; i++) {
-          workers.push(
-            (async () => {
-              while (files.length) {
-                totalProcessedTime += await updateTestsInFile(
-                  root,
-                  files.pop()!,
-                  changeTestEmitter
-                );
+      for (let i = 0; i < 4; i++) {
+        workers.push(
+          (async () => {
+            while (files.length) {
+              totalProcessedTime += await updateTestsInFile(root, files.pop()!, changeTestEmitter);
 
-                // Parsing a lot of TS is slow. Throttle ourselves to avoid
-                // blocking the ext host for too long.
-                const duration = Date.now() - startedAt;
-                const actualPercentOfTimeOnMainThread = totalProcessedTime / duration;
-                const overusePercentage = actualPercentOfTimeOnMainThread - MAX_BLOCKING_TARGET;
-                const delayToGetBackDownToTarget = overusePercentage * duration;
-                if (delayToGetBackDownToTarget > 1) {
-                  await delay(delayToGetBackDownToTarget);
-                }
+              // Parsing a lot of TS is slow. Throttle ourselves to avoid
+              // blocking the ext host for too long.
+              const duration = Date.now() - startedAt;
+              const actualPercentOfTimeOnMainThread = totalProcessedTime / duration;
+              const overusePercentage = actualPercentOfTimeOnMainThread - MAX_BLOCKING_TARGET;
+              const delayToGetBackDownToTarget = overusePercentage * duration;
+              if (delayToGetBackDownToTarget > 1) {
+                await delay(delayToGetBackDownToTarget);
               }
-            })()
-          );
+            }
+          })()
+        );
 
-          await Promise.all(workers);
-        }
-      })
-      .then(() => onDidDiscoverInitialTests.fire());
+        await Promise.all(workers);
+      }
+    });
 
     return {
       root,
       onDidChangeTest: changeTestEmitter.event,
-      onDidDiscoverInitialTests: onDidDiscoverInitialTests.event,
-      dispose: () => watcher.dispose(),
+      discoveredInitialTests,
+      dispose: () => {
+        watcher.dispose();
+        root.dispose();
+      },
+    };
+  }
+
+  /**
+   * @inheritdoc
+   */
+  public createDocumentTestHierarchy(document: TextDocument) {
+    const folder = workspace.getWorkspaceFolder(document.uri);
+    if (!folder) {
+      return;
+    }
+
+    const root = new TestRoot(folder);
+    const changeTestEmitter = new EventEmitter<VSCodeTest>();
+    const contentProvider = () => document.getText();
+    const discoveredInitialTests = updateTestsInFile(
+      root,
+      document.uri,
+      changeTestEmitter,
+      contentProvider
+    );
+
+    const updateTests = debounce(700, () =>
+      updateTestsInFile(root, document.uri, changeTestEmitter, contentProvider)
+    );
+    const changeListener = workspace.onDidChangeTextDocument(e => {
+      if (e.document === document) {
+        updateTests();
+      }
+    });
+
+    return {
+      root,
+      onDidChangeTest: changeTestEmitter.event,
+      discoveredInitialTests,
+      dispose: () => {
+        changeListener.dispose();
+        updateTests.clear();
+        root.dispose();
+      },
     };
   }
 
@@ -159,7 +200,7 @@ function scanTestOutput(
         case MochaEvent.Pass:
           {
             const tcase = tests.get(evt[1].fullTitle);
-            outputChannel.appendLine(` x ${evt[1].fullTitle}`);
+            outputChannel.appendLine(` √ ${evt[1].fullTitle}`);
             if (tcase) {
               tcase.state = new TestState(TestRunState.Passed, undefined, evt[1].duration);
               tests.delete(evt[1].fullTitle);
@@ -169,10 +210,10 @@ function scanTestOutput(
         case MochaEvent.Fail:
           {
             const tcase = tests.get(evt[1].fullTitle);
-            outputChannel.appendLine(` √ ${evt[1].fullTitle}`);
+            outputChannel.appendLine(` x ${evt[1].fullTitle}`);
             if (tcase) {
               // todo: parse state to associate with a source location
-              const message = { message: evt[1].err };
+              const message: TestMessage = { message: evt[1].err, location: tcase.location };
               tcase.state = new TestState(TestRunState.Failed, [message], evt[1].duration);
               tests.delete(evt[1].fullTitle);
 
@@ -216,6 +257,11 @@ function removeTestsForFile(root: TestRoot, file: Uri, changeEmitter: EventEmitt
   }
 }
 
+const getContentsFromFile = async (file: Uri) => {
+  const contents = await workspace.fs.readFile(file);
+  return new TextDecoder('utf-8').decode(contents);
+};
+
 /**
  * Gets tests in the file by doing a full parse in TS. Returns the amount of
  * main-thread time taken.
@@ -223,11 +269,11 @@ function removeTestsForFile(root: TestRoot, file: Uri, changeEmitter: EventEmitt
 async function updateTestsInFile(
   root: TestRoot,
   file: Uri,
-  changeEmitter: EventEmitter<VSCodeTest>
+  changeEmitter: EventEmitter<VSCodeTest>,
+  getContents: (uri: Uri) => string | Promise<string> = getContentsFromFile
 ) {
   try {
-    const contents = await workspace.fs.readFile(file);
-    const decoded = new TextDecoder('utf-8').decode(contents);
+    const decoded = await getContents(file);
     const ast = ts.createSourceFile(
       file.path.split('/').pop()!,
       decoded,
@@ -248,9 +294,16 @@ async function updateTestsInFile(
       }
 
       const parent = parents[parents.length - 1];
-      const deduped = parent.addChild(testItem);
+      const [deduped, changed] = parent.addChild(testItem);
+      if (changed) {
+        changedTests.add(deduped);
+      }
+
       if (deduped === testItem) {
         changedTests.add(parent);
+        if (testItem instanceof TestCase) {
+          testItem.connect();
+        }
       }
 
       if (deduped instanceof TestSuite) {
@@ -288,24 +341,29 @@ const extractTestFromNode = (
 
   const lhs = node.expression;
   const name = node.arguments[0];
+  const func = node.arguments[1];
   if (!name || !ts.isIdentifier(lhs) || !ts.isStringLiteralLike(name)) {
     return undefined;
   }
 
-  if (lhs.escapedText === 'test') {
-    const start = src.getLineAndCharacterOfPosition(node.pos);
-    const end = src.getLineAndCharacterOfPosition(node.end);
-    const range = new Range(
-      new Position(start.line, start.character),
-      new Position(end.line, end.character)
-    );
+  if (!func || !ts.isFunctionLike(func)) {
+    return undefined;
+  }
 
-    const location = new Location(fileUri, range);
+  const start = src.getLineAndCharacterOfPosition(name.pos);
+  const end = src.getLineAndCharacterOfPosition(func.end);
+  const range = new Range(
+    new Position(start.line, start.character),
+    new Position(end.line, end.character)
+  );
+  const location = new Location(fileUri, range);
+
+  if (lhs.escapedText === 'test') {
     return new TestCase(name.text, location, generation, root, changeEmitter);
   }
 
   if (lhs.escapedText === 'suite') {
-    return new TestSuite(name.text, root);
+    return new TestSuite(name.text, location, root);
   }
 
   return undefined;
