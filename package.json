@@ -3,7 +3,7 @@
 	"displayName": "VS Code Selfhost Test Provider",
 	"description": "Test provider for the VS Code project",
 	"enableProposedApi": true,
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"publisher": "ms-vscode",
 	"engines": {
 		"vscode": "^1.53.0-insider"
@@ -21,16 +21,16 @@
 		"tabWidth": 2,
 		"arrowParens": "avoid"
 	},
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/microsoft/vscode-selfhost-test-provider.git"
-  },
-  "author": "Connor Peet <connor@peet.io>",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/microsoft/vscode-selfhost-test-provider/issues"
-  },
-  "homepage": "https://github.com/microsoft/vscode-selfhost-test-provider#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/microsoft/vscode-selfhost-test-provider.git"
+	},
+	"author": "Connor Peet <connor@peet.io>",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/microsoft/vscode-selfhost-test-provider/issues"
+	},
+	"homepage": "https://github.com/microsoft/vscode-selfhost-test-provider#readme",
 	"scripts": {
 		"vscode:prepublish": "npm run package",
 		"compile": "webpack --config ./build/node-extension.webpack.config.js",
