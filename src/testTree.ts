@@ -157,7 +157,9 @@ export class TestCase implements TestItem {
     public generation: number,
     public readonly root: TestRoot,
     private readonly changeEmitter: EventEmitter<VSCodeTest>
-  ) {}
+  ) {
+    this.label = label || '<empty>';
+  }
 
   public connect() {
     this.state = states.current(this.fullTitle);
