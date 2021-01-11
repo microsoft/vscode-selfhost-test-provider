@@ -34,6 +34,7 @@ const MAX_BLOCKING_TARGET = 0.5;
 
 export class VscodeTestProvider implements TestProvider<VSCodeTest> {
   private outputChannel?: OutputChannel;
+  private queue = Promise.resolve();
 
   /**
    * @inheritdoc
@@ -133,28 +134,34 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
 
     const pending = getPendingTestMap(req.tests);
     for (const test of pending.values()) {
-      test.state = new TestState(TestRunState.Running);
+      test.state = new TestState(TestRunState.Queued);
     }
 
-    const output = this.getOutputChannel();
-    output.appendLine('');
-    output.appendLine(`Starting test run at ${new Date().toLocaleString()}`);
-    output.appendLine('');
+    return (this.queue = this.queue.then(async () => {
+      for (const test of pending.values()) {
+        test.state = new TestState(TestRunState.Running);
+      }
 
-    const outcome = await scanTestOutput(
-      output,
-      req.debug ? await runner.debug(req.tests) : await runner.run(req.tests),
-      pending,
-      cancellationToken
-    );
-    for (const test of pending.values()) {
-      test.state = new TestState(outcome);
-    }
+      const output = this.getOutputChannel();
+      output.appendLine('');
+      output.appendLine(`Starting test run at ${new Date().toLocaleString()}`);
+      output.appendLine('');
 
-    // some error:
-    if (outcome !== TestRunState.Skipped) {
-      output.show();
-    }
+      const outcome = await scanTestOutput(
+        output,
+        req.debug ? await runner.debug(req.tests) : await runner.run(req.tests),
+        pending,
+        cancellationToken
+      );
+      for (const test of pending.values()) {
+        test.state = new TestState(outcome);
+      }
+
+      // some error:
+      if (outcome !== TestRunState.Skipped) {
+        output.show();
+      }
+    }));
   }
 
   private getOutputChannel() {
@@ -327,6 +334,8 @@ async function updateTestsInFile(
   }
 }
 
+const suiteNames = new Set(['suite', 'flakySuite']);
+
 const extractTestFromNode = (
   fileUri: Uri,
   root: TestRoot,
@@ -362,7 +371,7 @@ const extractTestFromNode = (
     return new TestCase(name.text, location, generation, root, changeEmitter);
   }
 
-  if (lhs.escapedText === 'suite') {
+  if (suiteNames.has(lhs.escapedText.toString())) {
     return new TestSuite(name.text, location, root);
   }
 
