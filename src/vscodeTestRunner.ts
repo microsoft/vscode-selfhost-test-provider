@@ -68,7 +68,7 @@ export abstract class VSCodeTestRunner {
   }
 
   private prepareArguments(tests: ReadonlyArray<VSCodeTest>) {
-    const args = [TEST_SCRIPT_PATH, ...this.getDefaultArgs(), '--reporter', 'json-stream'];
+    const args = [TEST_SCRIPT_PATH, ...this.getDefaultArgs(), '--reporter', 'full-json-stream'];
 
     if (tests.length && !tests.some(t => t instanceof TestRoot)) {
       const re = (tests as (TestSuite | TestCase)[])

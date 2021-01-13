@@ -29,6 +29,8 @@ export interface IPassEvent {
 export interface IFailEvent extends IPassEvent {
   err: string;
   stack: string | null;
+  expected?: string;
+  actual?: string;
 }
 
 export interface IEndEvent {

@@ -2,6 +2,7 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
+import { SourceMapConsumer } from 'source-map';
 import * as ts from 'typescript';
 import {
   CancellationToken,
@@ -216,18 +217,36 @@ function scanTestOutput(
           break;
         case MochaEvent.Fail:
           {
-            const tcase = tests.get(evt[1].fullTitle);
-            outputChannel.appendLine(` x ${evt[1].fullTitle}`);
-            if (tcase) {
-              // todo: parse state to associate with a source location
-              const message: TestMessage = { message: evt[1].err, location: tcase.location };
-              tcase.state = new TestState(TestRunState.Failed, [message], evt[1].duration);
-              tests.delete(evt[1].fullTitle);
+            const { err, stack, duration, expected, actual, fullTitle } = evt[1];
+            const tcase = tests.get(fullTitle);
+            outputChannel.appendLine(` x ${fullTitle}`);
+            if (!tcase) {
+              return;
+            }
+
+            tests.delete(fullTitle);
+            const testFirstLine = new Location(
+              tcase.location.uri,
+              new Range(
+                tcase.location.range.start,
+                new Position(tcase.location.range.start.line, 100)
+              )
+            );
+
+            tryDeriveLocation(stack || err).then(location => {
+              const message: TestMessage = {
+                message: err,
+                location: location ?? testFirstLine,
+                actualOutput: actual,
+                expectedOutput: expected,
+              };
+
+              tcase.state = new TestState(TestRunState.Failed, [message], duration);
 
               // todo(connor4312): temporary until there's richer test output:
-              outputChannel.appendLine(evt[1].stack || evt[1].err);
+              outputChannel.appendLine(stack || err);
               outputChannel.show();
-            }
+            });
           }
           break;
         case MochaEvent.End:
@@ -236,6 +255,35 @@ function scanTestOutput(
       }
     });
   }).finally(() => scanner.dispose());
+}
+
+async function tryDeriveLocation(stack: string) {
+  const parts = /(file:\/{3}.+):([0-9]+):([0-9]+)/.exec(stack);
+  if (!parts) {
+    return;
+  }
+
+  const [, fileUri, line, col] = parts;
+  let sourceMap: SourceMapConsumer;
+  try {
+    const sourceMapUri = fileUri + '.map';
+    const contents = await getContentsFromFile(Uri.parse(sourceMapUri));
+    sourceMap = await new SourceMapConsumer(contents, sourceMapUri);
+  } catch (e) {
+    console.warn(`Error parsing sourcemap for ${fileUri}: ${e.stack}`);
+    return;
+  }
+
+  const position = sourceMap.originalPositionFor({
+    column: Number(col) - 1,
+    line: Number(line),
+  });
+
+  if (position.line === null || position.column === null || position.source === null) {
+    return;
+  }
+
+  return new Location(Uri.parse(position.source), new Position(position.line - 1, position.column));
 }
 
 function getPendingTestMap(tests: ReadonlyArray<VSCodeTest>) {
