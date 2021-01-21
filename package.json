@@ -37,7 +37,7 @@
 		"watch": "webpack --watch --config ./build/node-extension.webpack.config.js",
 		"package": "webpack --mode production --devtool hidden-source-map --config ./build/node-extension.webpack.config.js",
 		"fmt": "prettier --write \"src/**/*.ts\"&& npm run test -- --fix",
-		"test": "eslint src --ext ts && tsc --noEmit",
+		"test": "tsc --noEmit && eslint src --ext ts",
 		"download-api": "vscode-dts dev",
 		"postdownload-api": "vscode-dts master",
 		"postinstall": "npm run download-api"

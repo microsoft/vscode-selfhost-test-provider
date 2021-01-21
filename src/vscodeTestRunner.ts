@@ -25,7 +25,7 @@ export abstract class VSCodeTestRunner {
     const cp = spawn(await this.binaryPath(), this.prepareArguments(tests), {
       cwd: this.repoLocation.uri.fsPath,
       stdio: 'pipe',
-      env: { ELECTRON_ENABLE_LOGGING: '1' },
+      env: this.getEnvironment(),
     });
 
     return new TestOutputScanner(cp);
@@ -38,7 +38,7 @@ export abstract class VSCodeTestRunner {
       {
         cwd: this.repoLocation.uri.fsPath,
         stdio: 'pipe',
-        env: { ELECTRON_ENABLE_LOGGING: '1' },
+        env: this.getEnvironment(),
       }
     );
 
@@ -65,6 +65,14 @@ export abstract class VSCodeTestRunner {
     });
 
     return new TestOutputScanner(cp);
+  }
+
+  private getEnvironment(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: undefined,
+      ELECTRON_ENABLE_LOGGING: '1',
+    };
   }
 
   private prepareArguments(tests: ReadonlyArray<VSCodeTest>) {

@@ -45,7 +45,6 @@ export class TestItemWithChildren {
     return [suiteOrCase, false];
   }
 
-
   /**
    * Disposes of the node and all its children.
    */
