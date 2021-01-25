@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "./test-extractor"
+		}
+	],
+	"settings": {
+		"typescript.tsc.autoDetect": "off",
+		"typescript.tsdk": "node_modules\\typescript\\lib",
+	}
+}

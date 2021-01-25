@@ -3,7 +3,6 @@
  *--------------------------------------------------------*/
 
 import { SourceMapConsumer } from 'source-map';
-import * as ts from 'typescript';
 import {
   CancellationToken,
   EventEmitter,
@@ -24,6 +23,7 @@ import {
   WorkspaceFolder,
 } from 'vscode';
 import { debounce } from './debounce';
+import { extractTests } from './extractTestsTs';
 import { MochaEvent, TestOutputScanner } from './testOutputScanner';
 import { TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
 import { PlatformTestRunner } from './vscodeTestRunner';
@@ -329,46 +329,16 @@ async function updateTestsInFile(
 ) {
   try {
     const decoded = await getContents(file);
-    const ast = ts.createSourceFile(
-      file.path.split('/').pop()!,
-      decoded,
-      ts.ScriptTarget.ESNext,
-      false,
-      ts.ScriptKind.TS
-    );
-
     const startedAt = Date.now();
     const thisGeneration = generation++;
-    const parents: (TestRoot | TestSuite)[] = [root];
-    const changedTests = new Set<VSCodeTest>();
-    const traverse = (node: ts.Node) => {
-      const testItem = extractTestFromNode(file, root, ast, node, changeEmitter, thisGeneration);
-      if (!testItem) {
-        ts.forEachChild(node, traverse);
-        return;
-      }
+    const changedTests = extractTests(decoded, {
+      root,
+      file,
+      onTestCase: (name, location) =>
+        new TestCase(name, location, thisGeneration, root, changeEmitter),
+      onTestSuite: (name, location) => new TestSuite(name, location, root),
+    });
 
-      const parent = parents[parents.length - 1];
-      const [deduped, changed] = parent.addChild(testItem);
-      if (changed) {
-        changedTests.add(deduped);
-      }
-
-      if (deduped === testItem) {
-        changedTests.add(parent);
-        if (testItem instanceof TestCase) {
-          testItem.connect();
-        }
-      }
-
-      if (deduped instanceof TestSuite) {
-        parents.push(deduped);
-        ts.forEachChild(node, traverse);
-        parents.pop();
-      }
-    };
-
-    ts.forEachChild(ast, traverse);
     root.prune(file, thisGeneration, changedTests);
 
     for (const change of changedTests) {
@@ -381,47 +351,3 @@ async function updateTestsInFile(
     return 1;
   }
 }
-
-const suiteNames = new Set(['suite', 'flakySuite']);
-
-const extractTestFromNode = (
-  fileUri: Uri,
-  root: TestRoot,
-  src: ts.SourceFile,
-  node: ts.Node,
-  changeEmitter: EventEmitter<VSCodeTest>,
-  generation: number
-) => {
-  if (!ts.isCallExpression(node)) {
-    return undefined;
-  }
-
-  const lhs = node.expression;
-  const name = node.arguments[0];
-  const func = node.arguments[1];
-  if (!name || !ts.isIdentifier(lhs) || !ts.isStringLiteralLike(name)) {
-    return undefined;
-  }
-
-  if (!func || !ts.isFunctionLike(func)) {
-    return undefined;
-  }
-
-  const start = src.getLineAndCharacterOfPosition(name.pos);
-  const end = src.getLineAndCharacterOfPosition(func.end);
-  const range = new Range(
-    new Position(start.line, start.character),
-    new Position(end.line, end.character)
-  );
-  const location = new Location(fileUri, range);
-
-  if (lhs.escapedText === 'test') {
-    return new TestCase(name.text, location, generation, root, changeEmitter);
-  }
-
-  if (suiteNames.has(lhs.escapedText.toString())) {
-    return new TestSuite(name.text, location, root);
-  }
-
-  return undefined;
-};
