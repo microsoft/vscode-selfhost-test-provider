@@ -81,7 +81,7 @@ export abstract class VSCodeTestRunner {
     if (tests.length && !tests.some(t => t instanceof TestRoot)) {
       const re = (tests as (TestSuite | TestCase)[])
         // for test cases, match exact name. For test suites, match all children
-        .map(t => escapeRe(t.fullTitle) + (t instanceof TestCase ? '$' : ' '))
+        .map(t => escapeRe(t.id) + (t instanceof TestCase ? '$' : ' '))
         .join('|');
       args.push('--grep', `/^(${re})/`);
     }

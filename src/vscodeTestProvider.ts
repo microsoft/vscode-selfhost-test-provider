@@ -207,24 +207,25 @@ function scanTestOutput(
           break; // no-op
         case MochaEvent.Pass:
           {
-            const tcase = tests.get(evt[1].fullTitle);
-            outputChannel.appendLine(` √ ${evt[1].fullTitle}`);
+            const id = evt[1].fullTitle;
+            const tcase = tests.get(id);
+            outputChannel.appendLine(` √ ${id}`);
             if (tcase) {
               tcase.state = new TestState(TestRunState.Passed, undefined, evt[1].duration);
-              tests.delete(evt[1].fullTitle);
+              tests.delete(id);
             }
           }
           break;
         case MochaEvent.Fail:
           {
-            const { err, stack, duration, expected, actual, fullTitle } = evt[1];
-            const tcase = tests.get(fullTitle);
-            outputChannel.appendLine(` x ${fullTitle}`);
+            const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
+            const tcase = tests.get(id);
+            outputChannel.appendLine(` x ${id}`);
             if (!tcase) {
               return;
             }
 
-            tests.delete(fullTitle);
+            tests.delete(id);
             const testFirstLine = new Location(
               tcase.location.uri,
               new Range(
@@ -242,10 +243,7 @@ function scanTestOutput(
               };
 
               tcase.state = new TestState(TestRunState.Failed, [message], duration);
-
-              // todo(connor4312): temporary until there's richer test output:
               outputChannel.appendLine(stack || err);
-              outputChannel.show();
             });
           }
           break;
@@ -292,7 +290,7 @@ function getPendingTestMap(tests: ReadonlyArray<VSCodeTest>) {
   while (queue.length) {
     for (const child of queue.pop()!) {
       if (child instanceof TestCase) {
-        titleMap.set(child.fullTitle, child);
+        titleMap.set(child.id, child);
       } else {
         queue.push(child.children);
       }

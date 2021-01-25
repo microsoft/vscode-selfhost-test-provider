@@ -2,14 +2,13 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
-import { TestRunState, TestState } from 'vscode';
+import { test, TestItem, TestRunState, TestState } from 'vscode';
 
 /**
  * Utility class used in the state registry.
  */
 class StateValue {
   private readonly listeners = new Set<(v: TestState) => void>();
-  private _value = StateRegistry.unsetState;
 
   public get value() {
     return this._value;
@@ -31,7 +30,23 @@ class StateValue {
     this.listeners.delete(l);
     return this.listeners.size;
   }
+
+  constructor(private _value: TestState) {}
 }
+
+const getItemInResults = (id: string) => {
+  const find = (result: TestItem): TestItem | undefined =>
+    result.id === id ? result : result.children?.find(find);
+
+  for (const t of test.testResults?.tests ?? []) {
+    const found = find(t);
+    if (found) {
+      return found;
+    }
+  }
+
+  return undefined;
+};
 
 /**
  * Singleton used to share state internally between tests in text files and
@@ -43,7 +58,7 @@ class StateRegistry {
   private readonly values = new Map<string, StateValue>();
 
   public current(id: string) {
-    return this.values.get(id)?.value ?? StateRegistry.unsetState;
+    return this.values.get(id)?.value ?? getItemInResults(id)?.state ?? StateRegistry.unsetState;
   }
 
   public update(id: string, value: TestState) {
@@ -56,7 +71,7 @@ class StateRegistry {
   public listen(id: string, l: (v: TestState) => void) {
     let value = this.values.get(id);
     if (!value) {
-      value = new StateValue();
+      value = new StateValue(this.current(id));
       this.values.set(id, value);
     }
 

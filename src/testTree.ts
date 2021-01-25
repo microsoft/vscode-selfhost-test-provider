@@ -101,8 +101,8 @@ export class TestSuite extends TestItemWithChildren implements TestItem {
   public readonly state = new TestState(TestRunState.Unset);
   public suite?: TestSuite;
 
-  public get fullTitle(): string {
-    return this.suite ? `${this.suite.fullTitle} ${this.label}` : this.label;
+  public get id(): string {
+    return this.suite ? `${this.suite.id} ${this.label}` : this.label;
   }
 
   constructor(
@@ -126,7 +126,7 @@ export class TestSuite extends TestItemWithChildren implements TestItem {
 export class TestCase implements TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
-  private _state = new TestState(TestRunState.Unset);
+  private _state: TestState = new TestState(TestRunState.Unset);
   private disposeListener?: () => void;
   public suite?: TestSuite;
 
@@ -141,13 +141,13 @@ export class TestCase implements TestItem {
 
     this._state = s;
     if (this.disposeListener) {
-      states.update(this.fullTitle, s);
+      states.update(this.id, s);
       this.changeEmitter.fire(this); // don't fire before connection
     }
   }
 
-  public get fullTitle(): string {
-    return this.suite ? `${this.suite.fullTitle} ${this.label}` : this.label;
+  public get id(): string {
+    return this.suite ? `${this.suite.id} ${this.label}` : this.label;
   }
 
   constructor(
@@ -161,8 +161,8 @@ export class TestCase implements TestItem {
   }
 
   public connect() {
-    this.state = states.current(this.fullTitle);
-    this.disposeListener = states.listen(this.fullTitle, s => (this.state = s));
+    this.disposeListener = states.listen(this.id, s => (this.state = s));
+    this._state = states.current(this.id);
   }
 
   public dispose() {
