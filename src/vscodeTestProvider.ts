@@ -43,11 +43,12 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
     const root = new TestRoot(workspaceFolder);
     const pattern = new RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
 
-    const changeTestEmitter = new EventEmitter<VSCodeTest>();
+    const changedEmitter = new EventEmitter<VSCodeTest>();
+    const invalidateEmitter = new EventEmitter<VSCodeTest>();
     const watcher = workspace.createFileSystemWatcher(pattern);
-    watcher.onDidCreate(async uri => await updateTestsInFile(root, uri, changeTestEmitter));
-    watcher.onDidChange(async uri => await updateTestsInFile(root, uri, changeTestEmitter));
-    watcher.onDidDelete(uri => removeTestsForFile(root, uri, changeTestEmitter));
+    watcher.onDidCreate(uri => updateTestsInFile(root, uri, changedEmitter, invalidateEmitter));
+    watcher.onDidChange(uri => updateTestsInFile(root, uri, changedEmitter, invalidateEmitter));
+    watcher.onDidDelete(uri => removeTestsForFile(root, uri, changedEmitter));
 
     const discoveredInitialTests = workspace.findFiles(pattern).then(async files => {
       const workers: Promise<void>[] = [];
@@ -58,7 +59,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
         workers.push(
           (async () => {
             while (files.length) {
-              totalProcessedTime += await updateTestsInFile(root, files.pop()!, changeTestEmitter);
+              totalProcessedTime += await updateTestsInFile(root, files.pop()!, changedEmitter);
 
               // Parsing a lot of TS is slow. Throttle ourselves to avoid
               // blocking the ext host for too long.
@@ -79,7 +80,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
 
     return {
       root,
-      onDidChangeTest: changeTestEmitter.event,
+      onDidChangeTest: changedEmitter.event,
       discoveredInitialTests,
       dispose: () => watcher.dispose(),
     };
@@ -101,11 +102,13 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       root,
       document.uri,
       changeTestEmitter,
+      undefined,
       contentProvider
     );
 
+    const invalidatedTestEmitter = new EventEmitter<VSCodeTest>();
     const updateTests = debounce(700, () =>
-      updateTestsInFile(root, document.uri, changeTestEmitter, contentProvider)
+      updateTestsInFile(root, document.uri, changeTestEmitter, invalidatedTestEmitter)
     );
     const changeListener = workspace.onDidChangeTextDocument(e => {
       if (e.document === document) {
@@ -116,6 +119,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
     return {
       root,
       onDidChangeTest: changeTestEmitter.event,
+      onDidInvalidateTest: invalidatedTestEmitter.event,
       discoveredInitialTests,
       dispose: () => {
         changeListener.dispose();
@@ -309,6 +313,7 @@ async function updateTestsInFile(
   root: TestRoot,
   file: Uri,
   changeEmitter: EventEmitter<VSCodeTest>,
+  outdatedEmitter?: EventEmitter<VSCodeTest>,
   getContents: (uri: Uri) => string | Promise<string> = getContentsFromFile
 ) {
   try {
@@ -336,6 +341,7 @@ async function updateTestsInFile(
       const [deduped, changed] = parent.addChild(testItem);
       if (changed) {
         changedTests.add(deduped);
+        outdatedEmitter?.fire(deduped);
       }
 
       if (deduped === testItem) {
