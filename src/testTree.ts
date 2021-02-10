@@ -2,16 +2,7 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
-import {
-  EventEmitter,
-  Location,
-  TestItem,
-  TestRunState,
-  TestState,
-  Uri,
-  WorkspaceFolder,
-} from 'vscode';
-import { states } from './stateRegistry';
+import { Location, TestItem, Uri, WorkspaceFolder } from 'vscode';
 
 const locationEquals = (a: Location, b: Location) =>
   a.uri.toString() === b.uri.toString() && a.range.isEqual(b.range);
@@ -46,15 +37,6 @@ export class TestItemWithChildren {
   }
 
   /**
-   * Disposes of the node and all its children.
-   */
-  public dispose() {
-    for (const child of this.children.values()) {
-      child.dispose();
-    }
-  }
-
-  /**
    * Removes test cases in the file that were from a generation before the
    * given one. Returns whether it has any children left.
    */
@@ -62,13 +44,11 @@ export class TestItemWithChildren {
     for (const [name, child] of this.childrenByName) {
       if (child instanceof TestCase) {
         if (child.location.uri.toString() === inFile.toString() && child.generation < generation) {
-          child.dispose();
           this.childrenByName.delete(name);
           changes.add((this as unknown) as VSCodeTest);
         }
       } else {
         if (!child.prune(inFile, generation, changes)) {
-          child.dispose();
           this.childrenByName.delete(name);
           changes.delete(child);
           changes.add((this as unknown) as VSCodeTest);
@@ -84,7 +64,6 @@ export class TestRoot extends TestItemWithChildren implements TestItem {
   public readonly label = 'VS Code Unit Tests';
   public readonly runnable = true;
   public readonly debuggable = true;
-  public readonly state = new TestState(TestRunState.Unset);
 
   public get root() {
     return this;
@@ -98,7 +77,6 @@ export class TestRoot extends TestItemWithChildren implements TestItem {
 export class TestSuite extends TestItemWithChildren implements TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
-  public readonly state = new TestState(TestRunState.Unset);
   public suite?: TestSuite;
 
   public get id(): string {
@@ -126,25 +104,7 @@ export class TestSuite extends TestItemWithChildren implements TestItem {
 export class TestCase implements TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
-  private _state: TestState = new TestState(TestRunState.Unset);
-  private disposeListener?: () => void;
   public suite?: TestSuite;
-
-  public get state() {
-    return this._state;
-  }
-
-  public set state(s: TestState) {
-    if (s === this._state) {
-      return;
-    }
-
-    this._state = s;
-    if (this.disposeListener) {
-      states.update(this.id, s);
-      this.changeEmitter.fire(this); // don't fire before connection
-    }
-  }
 
   public get id(): string {
     return this.suite ? `${this.suite.id} ${this.label}` : this.label;
@@ -154,19 +114,9 @@ export class TestCase implements TestItem {
     public readonly label: string,
     public location: Location,
     public generation: number,
-    public readonly root: TestRoot,
-    private readonly changeEmitter: EventEmitter<VSCodeTest>
+    public readonly root: TestRoot
   ) {
     this.label = label || '<empty>';
-  }
-
-  public connect() {
-    this.disposeListener = states.listen(this.id, s => (this.state = s));
-    this._state = states.current(this.id);
-  }
-
-  public dispose() {
-    this.disposeListener?.();
   }
 }
 

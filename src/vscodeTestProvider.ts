@@ -14,9 +14,8 @@ import {
   RelativePattern,
   TestMessage,
   TestProvider,
-  TestRunOptions,
+  TestRun,
   TestRunState,
-  TestState,
   TextDocument,
   Uri,
   window,
@@ -82,10 +81,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       root,
       onDidChangeTest: changeTestEmitter.event,
       discoveredInitialTests,
-      dispose: () => {
-        watcher.dispose();
-        root.dispose();
-      },
+      dispose: () => watcher.dispose(),
     };
   }
 
@@ -124,25 +120,16 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       dispose: () => {
         changeListener.dispose();
         updateTests.clear();
-        root.dispose();
       },
     };
   }
 
-  public async runTests(req: TestRunOptions<VSCodeTest>, cancellationToken: CancellationToken) {
+  public async runTests(req: TestRun<VSCodeTest>, cancellationToken: CancellationToken) {
     const root = req.tests[0].root;
     const runner = new PlatformTestRunner(root.workspaceFolder);
 
     const pending = getPendingTestMap(req.tests);
-    for (const test of pending.values()) {
-      test.state = new TestState(TestRunState.Queued);
-    }
-
     return (this.queue = this.queue.then(async () => {
-      for (const test of pending.values()) {
-        test.state = new TestState(TestRunState.Running);
-      }
-
       const output = this.getOutputChannel();
       output.appendLine('');
       output.appendLine(`Starting test run at ${new Date().toLocaleString()}`);
@@ -150,13 +137,11 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
 
       const outcome = await scanTestOutput(
         output,
+        req,
         req.debug ? await runner.debug(req.tests) : await runner.run(req.tests),
         pending,
         cancellationToken
       );
-      for (const test of pending.values()) {
-        test.state = new TestState(outcome);
-      }
 
       // some error:
       if (outcome !== TestRunState.Skipped) {
@@ -178,6 +163,7 @@ const delay = (duration: number) => new Promise<void>(r => setTimeout(r, duratio
 
 function scanTestOutput(
   outputChannel: OutputChannel,
+  req: TestRun<VSCodeTest>,
   scanner: TestOutputScanner,
   tests: Map<string, TestCase>,
   cancellation: CancellationToken
@@ -211,7 +197,7 @@ function scanTestOutput(
             const tcase = tests.get(id);
             outputChannel.appendLine(` √ ${id}`);
             if (tcase) {
-              tcase.state = new TestState(TestRunState.Passed, undefined, evt[1].duration);
+              req.setState(tcase, { duration: evt[1].duration, state: TestRunState.Passed });
               tests.delete(id);
             }
           }
@@ -242,7 +228,7 @@ function scanTestOutput(
                 expectedOutput: expected,
               };
 
-              tcase.state = new TestState(TestRunState.Failed, [message], duration);
+              req.setState(tcase, { duration, messages: [message], state: TestRunState.Failed });
               outputChannel.appendLine(stack || err);
             });
           }
@@ -340,7 +326,7 @@ async function updateTestsInFile(
     const parents: (TestRoot | TestSuite)[] = [root];
     const changedTests = new Set<VSCodeTest>();
     const traverse = (node: ts.Node) => {
-      const testItem = extractTestFromNode(file, root, ast, node, changeEmitter, thisGeneration);
+      const testItem = extractTestFromNode(file, root, ast, node, thisGeneration);
       if (!testItem) {
         ts.forEachChild(node, traverse);
         return;
@@ -354,9 +340,6 @@ async function updateTestsInFile(
 
       if (deduped === testItem) {
         changedTests.add(parent);
-        if (testItem instanceof TestCase) {
-          testItem.connect();
-        }
       }
 
       if (deduped instanceof TestSuite) {
@@ -387,7 +370,6 @@ const extractTestFromNode = (
   root: TestRoot,
   src: ts.SourceFile,
   node: ts.Node,
-  changeEmitter: EventEmitter<VSCodeTest>,
   generation: number
 ) => {
   if (!ts.isCallExpression(node)) {
@@ -414,7 +396,7 @@ const extractTestFromNode = (
   const location = new Location(fileUri, range);
 
   if (lhs.escapedText === 'test') {
-    return new TestCase(name.text, location, generation, root, changeEmitter);
+    return new TestCase(name.text, location, generation, root);
   }
 
   if (suiteNames.has(lhs.escapedText.toString())) {
