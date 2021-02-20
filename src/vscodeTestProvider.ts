@@ -24,7 +24,7 @@ import {
 } from 'vscode';
 import { debounce } from './debounce';
 import { MochaEvent, TestOutputScanner } from './testOutputScanner';
-import { TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
+import { idPrefix, TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
 import { PlatformTestRunner } from './vscodeTestRunner';
 
 declare const TextDecoder: typeof import('util').TextDecoder; // node in the typings yet
@@ -198,7 +198,7 @@ function scanTestOutput(
         case MochaEvent.Pass:
           {
             const id = evt[1].fullTitle;
-            const tcase = tests.get(id);
+            const tcase = tests.get(idPrefix + id);
             outputChannel.appendLine(` √ ${id}`);
             if (tcase) {
               req.setState(tcase, { duration: evt[1].duration, state: TestRunState.Passed });
@@ -209,7 +209,7 @@ function scanTestOutput(
         case MochaEvent.Fail:
           {
             const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
-            const tcase = tests.get(id);
+            const tcase = tests.get(idPrefix + id);
             outputChannel.appendLine(` x ${id}`);
             if (!tcase) {
               return;

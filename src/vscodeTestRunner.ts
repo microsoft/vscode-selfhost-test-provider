@@ -7,7 +7,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { debug, DebugSession, WorkspaceFolder } from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
+import { idPrefix, TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
 
 /**
  * From MDN
@@ -81,7 +81,7 @@ export abstract class VSCodeTestRunner {
     if (tests.length && !tests.some(t => t instanceof TestRoot)) {
       const re = (tests as (TestSuite | TestCase)[])
         // for test cases, match exact name. For test suites, match all children
-        .map(t => escapeRe(t.id) + (t instanceof TestCase ? '$' : ' '))
+        .map(t => escapeRe(t.id.slice(idPrefix.length)) + (t instanceof TestCase ? '$' : ' '))
         .join('|');
       args.push('--grep', `/^(${re})/`);
     }

@@ -7,6 +7,8 @@ import { Location, TestItem, Uri, WorkspaceFolder } from 'vscode';
 const locationEquals = (a: Location, b: Location) =>
   a.uri.toString() === b.uri.toString() && a.range.isEqual(b.range);
 
+export const idPrefix = 'ms-vscode.vscode-selfhost-test-provider/';
+
 export class TestItemWithChildren {
   public get children() {
     return [...this.childrenByName.values()];
@@ -65,6 +67,10 @@ export class TestRoot extends TestItemWithChildren implements TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
 
+  public get id() {
+    return idPrefix;
+  }
+
   public get root() {
     return this;
   }
@@ -80,7 +86,7 @@ export class TestSuite extends TestItemWithChildren implements TestItem {
   public suite?: TestSuite;
 
   public get id(): string {
-    return this.suite ? `${this.suite.id} ${this.label}` : this.label;
+    return this.suite ? `${this.suite.id} ${this.label}` : idPrefix + this.label;
   }
 
   constructor(
@@ -107,7 +113,7 @@ export class TestCase implements TestItem {
   public suite?: TestSuite;
 
   public get id(): string {
-    return this.suite ? `${this.suite.id} ${this.label}` : this.label;
+    return this.suite ? `${this.suite.id} ${this.label}` : idPrefix + this.label;
   }
 
   constructor(
