@@ -8,6 +8,7 @@ import {
   CancellationToken,
   EventEmitter,
   Location,
+  MarkdownString,
   OutputChannel,
   Position,
   Range,
@@ -227,7 +228,7 @@ function scanTestOutput(
 
             tryDeriveLocation(stack || err).then(location => {
               const message: TestMessage = {
-                message: err,
+                message: tryMakeMarkdown(err),
                 location: location ?? testFirstLine,
                 actualOutput: actual,
                 expectedOutput: expected,
@@ -245,6 +246,18 @@ function scanTestOutput(
     });
   }).finally(() => scanner.dispose());
 }
+
+const tryMakeMarkdown = (message: string) => {
+  const lines = message.split('\n');
+  const start = lines.findIndex(l => l.includes('+ actual'));
+  if (start === -1) {
+    return message;
+  }
+
+  lines.splice(start, 1, '```diff');
+  lines.push('```');
+  return new MarkdownString(lines.join('\n'));
+};
 
 async function tryDeriveLocation(stack: string) {
   const parts = /(file:\/{3}.+):([0-9]+):([0-9]+)/.exec(stack);
