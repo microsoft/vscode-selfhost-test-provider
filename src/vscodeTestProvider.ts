@@ -39,7 +39,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
   /**
    * @inheritdoc
    */
-  public createWorkspaceTestHierarchy(workspaceFolder: WorkspaceFolder) {
+  public provideWorkspaceTestHierarchy(workspaceFolder: WorkspaceFolder, token: CancellationToken) {
     const root = new TestRoot(workspaceFolder);
     const pattern = new RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
 
@@ -49,6 +49,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
     watcher.onDidCreate(uri => updateTestsInFile(root, uri, changedEmitter, invalidateEmitter));
     watcher.onDidChange(uri => updateTestsInFile(root, uri, changedEmitter, invalidateEmitter));
     watcher.onDidDelete(uri => removeTestsForFile(root, uri, changedEmitter));
+    token.onCancellationRequested(() => watcher.dispose());
 
     const discoveredInitialTests = workspace.findFiles(pattern).then(async files => {
       const workers: Promise<void>[] = [];
@@ -82,14 +83,13 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       root,
       onDidChangeTest: changedEmitter.event,
       discoveredInitialTests,
-      dispose: () => watcher.dispose(),
     };
   }
 
   /**
    * @inheritdoc
    */
-  public createDocumentTestHierarchy(document: TextDocument) {
+  public provideDocumentTestHierarchy(document: TextDocument, token: CancellationToken) {
     const folder = workspace.getWorkspaceFolder(document.uri);
     if (!folder) {
       return;
@@ -116,15 +116,16 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       }
     });
 
+    token.onCancellationRequested(() => {
+      changeListener.dispose();
+      updateTests.clear();
+    });
+
     return {
       root,
       onDidChangeTest: changeTestEmitter.event,
       onDidInvalidateTest: invalidatedTestEmitter.event,
       discoveredInitialTests,
-      dispose: () => {
-        changeListener.dispose();
-        updateTests.clear();
-      },
     };
   }
 
