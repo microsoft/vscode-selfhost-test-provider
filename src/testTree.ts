@@ -9,18 +9,13 @@ const locationEquals = (a: Location, b: Location) =>
 
 export const idPrefix = 'ms-vscode.vscode-selfhost-test-provider/';
 
-export class TestItemWithChildren {
-  public get children() {
-    return [...this.childrenByName.values()];
-  }
-
-  private readonly childrenByName = new Map<string, TestSuite | TestCase>();
-
+export class TestItemWithChildren extends TestItem {
+  public children: (TestSuite | TestCase)[] = [];
   /**
    * Adds or merges in a direct child with this item.
    */
   public addChild(suiteOrCase: TestSuite | TestCase): [TestSuite | TestCase, boolean] {
-    const existing = this.childrenByName.get(suiteOrCase.label);
+    const existing = this.children.find(c => c.label === suiteOrCase.label);
     if (existing instanceof TestCase) {
       if (suiteOrCase instanceof TestCase) {
         existing.generation = suiteOrCase.generation;
@@ -34,7 +29,7 @@ export class TestItemWithChildren {
       return [existing, changed];
     }
 
-    this.childrenByName.set(suiteOrCase.label, suiteOrCase);
+    this.children.push(suiteOrCase);
     return [suiteOrCase, false];
   }
 
@@ -43,86 +38,72 @@ export class TestItemWithChildren {
    * given one. Returns whether it has any children left.
    */
   public prune(inFile: Uri, generation: number, changes: Set<VSCodeTest>) {
-    for (const [name, child] of this.childrenByName) {
+    this.children = this.children.filter(child => {
       if (child instanceof TestCase) {
         if (child.location.uri.toString() === inFile.toString() && child.generation < generation) {
-          this.childrenByName.delete(name);
           changes.add((this as unknown) as VSCodeTest);
+          return false;
         }
       } else {
         if (!child.prune(inFile, generation, changes)) {
-          this.childrenByName.delete(name);
           changes.delete(child);
           changes.add((this as unknown) as VSCodeTest);
+          return false;
         }
       }
-    }
 
-    return this.childrenByName.size > 0;
+      return true;
+    });
+
+    return this.children.length > 0;
   }
 }
 
 export class TestRoot extends TestItemWithChildren implements TestItem {
-  public readonly label = 'VS Code Unit Tests';
   public readonly runnable = true;
   public readonly debuggable = true;
-
-  public get id() {
-    return idPrefix;
-  }
 
   public get root() {
     return this;
   }
 
   constructor(public readonly workspaceFolder: WorkspaceFolder) {
-    super();
+    super(idPrefix, 'VS Code Unit Tests');
   }
 }
 
 export class TestSuite extends TestItemWithChildren implements TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
-  public suite?: TestSuite;
-
-  public get id(): string {
-    return this.suite ? `${this.suite.id} ${this.label}` : idPrefix + this.label;
-  }
 
   constructor(
     public readonly label: string,
     public location: Location,
-    public readonly root: TestRoot
+    public readonly root: TestRoot,
+    public readonly parent: TestSuite | TestRoot
   ) {
-    super();
-  }
-
-  /**
-   * @override
-   */
-  public addChild(suiteOrCase: TestSuite | TestCase) {
-    const deduped = super.addChild(suiteOrCase);
-    deduped[0].suite = this;
-    return deduped;
+    super(
+      parent instanceof TestSuite ? `${parent.id} ${label}` : idPrefix + label,
+      label || '<empty>'
+    );
   }
 }
 
-export class TestCase implements TestItem {
+export class TestCase extends TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
-  public suite?: TestSuite;
-
-  public get id(): string {
-    return this.suite ? `${this.suite.id} ${this.label}` : idPrefix + this.label;
-  }
 
   constructor(
     public readonly label: string,
     public location: Location,
     public generation: number,
-    public readonly root: TestRoot
+    public readonly root: TestRoot,
+    public readonly parent: TestSuite | TestRoot
   ) {
-    this.label = label || '<empty>';
+    super(
+      parent instanceof TestSuite ? `${parent.id} ${label}` : idPrefix + label,
+      label || '<empty>'
+    );
   }
 }
 

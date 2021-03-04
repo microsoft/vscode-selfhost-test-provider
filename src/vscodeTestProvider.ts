@@ -15,8 +15,9 @@ import {
   RelativePattern,
   TestMessage,
   TestProvider,
+  TestResult,
   TestRun,
-  TestRunState,
+  TestState,
   TextDocument,
   Uri,
   window,
@@ -150,7 +151,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       );
 
       // some error:
-      if (outcome !== TestRunState.Skipped) {
+      if (outcome !== TestResult.Skipped) {
         output.show();
       }
     }));
@@ -173,20 +174,20 @@ function scanTestOutput(
   scanner: TestOutputScanner,
   tests: Map<string, TestCase>,
   cancellation: CancellationToken
-): Promise<TestRunState> {
+): Promise<TestResult> {
   if (cancellation.isCancellationRequested) {
     scanner.dispose();
-    return Promise.resolve(TestRunState.Skipped);
+    return Promise.resolve(TestResult.Skipped);
   }
 
-  return new Promise<TestRunState>(resolve => {
+  return new Promise<TestResult>(resolve => {
     cancellation.onCancellationRequested(() => {
-      resolve(TestRunState.Skipped);
+      resolve(TestResult.Skipped);
     });
 
     scanner.onRunnerError(err => {
       outputChannel.appendLine(err);
-      resolve(TestRunState.Errored);
+      resolve(TestResult.Errored);
     });
 
     scanner.onOtherOutput(str => {
@@ -203,7 +204,9 @@ function scanTestOutput(
             const tcase = tests.get(idPrefix + id);
             outputChannel.appendLine(` √ ${id}`);
             if (tcase) {
-              req.setState(tcase, { duration: evt[1].duration, state: TestRunState.Passed });
+              const state = new TestState(TestResult.Passed);
+              state.duration = evt[1].duration;
+              req.setState(tcase, state);
               tests.delete(id);
             }
           }
@@ -227,20 +230,17 @@ function scanTestOutput(
             );
 
             tryDeriveLocation(stack || err).then(location => {
-              const message: TestMessage = {
-                message: tryMakeMarkdown(err),
-                location: location ?? testFirstLine,
-                actualOutput: actual,
-                expectedOutput: expected,
-              };
-
-              req.setState(tcase, { duration, messages: [message], state: TestRunState.Failed });
+              const message = new TestMessage(tryMakeMarkdown(err));
+              message.location = location ?? testFirstLine;
+              message.actualOutput = actual;
+              message.expectedOutput = expected;
+              req.setState(tcase, { duration, messages: [message], state: TestResult.Failed });
               outputChannel.appendLine(stack || err);
             });
           }
           break;
         case MochaEvent.End:
-          resolve(TestRunState.Skipped);
+          resolve(TestResult.Skipped);
           break;
       }
     });
@@ -345,13 +345,13 @@ async function updateTestsInFile(
     const parents: (TestRoot | TestSuite)[] = [root];
     const changedTests = new Set<VSCodeTest>();
     const traverse = (node: ts.Node) => {
-      const testItem = extractTestFromNode(file, root, ast, node, thisGeneration);
+      const parent = parents[parents.length - 1];
+      const testItem = extractTestFromNode(file, root, ast, node, parent, thisGeneration);
       if (!testItem) {
         ts.forEachChild(node, traverse);
         return;
       }
 
-      const parent = parents[parents.length - 1];
       const [deduped, changed] = parent.addChild(testItem);
       if (changed) {
         changedTests.add(deduped);
@@ -390,6 +390,7 @@ const extractTestFromNode = (
   root: TestRoot,
   src: ts.SourceFile,
   node: ts.Node,
+  parent: TestSuite | TestRoot,
   generation: number
 ) => {
   if (!ts.isCallExpression(node)) {
@@ -416,11 +417,11 @@ const extractTestFromNode = (
   const location = new Location(fileUri, range);
 
   if (lhs.escapedText === 'test') {
-    return new TestCase(name.text, location, generation, root);
+    return new TestCase(name.text, location, generation, root, parent);
   }
 
   if (suiteNames.has(lhs.escapedText.toString())) {
-    return new TestSuite(name.text, location, root);
+    return new TestSuite(name.text, location, root, parent);
   }
 
   return undefined;
