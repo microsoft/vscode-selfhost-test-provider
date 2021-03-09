@@ -42,7 +42,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
    * @inheritdoc
    */
   public provideWorkspaceTestHierarchy(workspaceFolder: WorkspaceFolder, token: CancellationToken) {
-    const root = new TestRoot(workspaceFolder);
+    const root = new TestRoot(workspaceFolder, `$root/${workspaceFolder.uri.toString()}`);
     const pattern = new RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
 
     const changedEmitter = new EventEmitter<VSCodeTest>();
@@ -97,7 +97,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       return;
     }
 
-    const root = new TestRoot(folder);
+    const root = new TestRoot(folder, `$root/${document.uri.toString()}`);
     const changeTestEmitter = new EventEmitter<VSCodeTest>();
     const contentProvider = () => document.getText();
     const discoveredInitialTests = updateTestsInFile(

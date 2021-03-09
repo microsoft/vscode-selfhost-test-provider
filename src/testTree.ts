@@ -67,8 +67,8 @@ export class TestRoot extends TestItemWithChildren implements TestItem {
     return this;
   }
 
-  constructor(public readonly workspaceFolder: WorkspaceFolder) {
-    super(idPrefix, 'VS Code Unit Tests');
+  constructor(public readonly workspaceFolder: WorkspaceFolder, id: string) {
+    super(idPrefix + id, 'VS Code Unit Tests');
   }
 }
 
