@@ -7,7 +7,15 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { debug, DebugSession, WorkspaceFolder } from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { idPrefix, TestCase, TestRoot, TestSuite, VSCodeTest } from './testTree';
+import {
+  DocumentTestRoot,
+  idPrefix,
+  TestCase,
+  TestFile,
+  TestSuite,
+  VSCodeTest,
+  WorkspaceTestRoot,
+} from './testTree';
 
 /**
  * From MDN
@@ -78,12 +86,28 @@ export abstract class VSCodeTestRunner {
   private prepareArguments(tests: ReadonlyArray<VSCodeTest>) {
     const args = [TEST_SCRIPT_PATH, ...this.getDefaultArgs(), '--reporter', 'full-json-stream'];
 
-    if (tests.length && !tests.some(t => t instanceof TestRoot)) {
-      const re = (tests as (TestSuite | TestCase)[])
-        // for test cases, match exact name. For test suites, match all children
-        .map(t => escapeRe(t.id.slice(idPrefix.length)) + (t instanceof TestCase ? '$' : ' '))
-        .join('|');
-      args.push('--grep', `/^(${re})/`);
+    const grepRe: string[] = [];
+    const runPaths: string[] = [];
+    for (const test of tests) {
+      if (test instanceof WorkspaceTestRoot) {
+        return args;
+      } else if (test instanceof TestCase || test instanceof TestSuite) {
+        grepRe.push(
+          escapeRe(test.id.slice(idPrefix.length)) + (test instanceof TestCase ? '$' : ' ')
+        );
+      } else if (test instanceof TestFile || test instanceof DocumentTestRoot) {
+        runPaths.push(
+          path.relative(test.workspaceFolder.uri.fsPath, test.uri.fsPath).replace(/\\/g, '/')
+        );
+      }
+    }
+
+    if (grepRe.length) {
+      args.push('--grep', `/^(${grepRe.join('|')})/`);
+    }
+
+    if (runPaths.length) {
+      args.push(...runPaths.flatMap(p => ['--run', p]));
     }
 
     return args;

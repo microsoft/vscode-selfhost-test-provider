@@ -28,6 +28,7 @@ import {
   getContentsFromFile,
   idPrefix,
   TestCase,
+  TestFile,
   TestRoot,
   VSCodeTest,
   WorkspaceTestRoot,
@@ -49,7 +50,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
    * @inheritdoc
    */
   public provideWorkspaceTestRoot(workspaceFolder: WorkspaceFolder): ProviderResult<VSCodeTest> {
-    return new WorkspaceTestRoot(workspaceFolder, `$workspace/${workspaceFolder.uri.toString()}`);
+    return new WorkspaceTestRoot(workspaceFolder);
   }
 
   /**
@@ -61,7 +62,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       return;
     }
 
-    return new DocumentTestRoot(folder, `$root/${document.uri.toString()}`, document);
+    return new DocumentTestRoot(folder, document);
   }
 
   public async runTests(req: TestRun<VSCodeTest>, cancellationToken: CancellationToken) {
@@ -73,7 +74,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
     const root = maybeRoot as TestRoot;
     const runner = new PlatformTestRunner(root.workspaceFolder);
 
-    const pending = getPendingTestMap(req.tests);
+    const pending = await getPendingTestMap(req.tests);
     return (this.queue = this.queue.then(async () => {
       const output = this.getOutputChannel();
       output.appendLine('');
@@ -224,12 +225,15 @@ async function tryDeriveLocation(stack: string) {
   return new Location(Uri.parse(position.source), new Position(position.line - 1, position.column));
 }
 
-function getPendingTestMap(tests: ReadonlyArray<VSCodeTest>) {
+async function getPendingTestMap(tests: ReadonlyArray<VSCodeTest>) {
   const queue: Iterable<VSCodeTest>[] = [tests];
   const titleMap = new Map<string, TestCase>();
   while (queue.length) {
     for (const child of queue.pop()!) {
-      if (child instanceof TestCase) {
+      if (child instanceof TestFile) {
+        await child.refresh();
+        queue.push(child.children);
+      } else if (child instanceof TestCase) {
         titleMap.set(child.id, child);
       } else {
         queue.push(child.children);

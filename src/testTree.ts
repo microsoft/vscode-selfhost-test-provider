@@ -40,8 +40,8 @@ export abstract class TestRoot extends TestItem<TestFile> {
     return this;
   }
 
-  constructor(public readonly workspaceFolder: WorkspaceFolder, id: string) {
-    super(idPrefix + id, 'VS Code Unit Tests', true);
+  constructor(public readonly workspaceFolder: WorkspaceFolder) {
+    super(idPrefix, 'VS Code Unit Tests', true);
   }
 }
 
@@ -49,12 +49,12 @@ export abstract class TestRoot extends TestItem<TestFile> {
  * The root node returned in `provideDocumentTestRoot`.
  */
 export class DocumentTestRoot extends TestRoot {
-  constructor(
-    workspaceFolder: WorkspaceFolder,
-    id: string,
-    private readonly document: TextDocument
-  ) {
-    super(workspaceFolder, id);
+  public get uri() {
+    return this.document.uri;
+  }
+
+  constructor(workspaceFolder: WorkspaceFolder, private readonly document: TextDocument) {
+    super(workspaceFolder);
   }
 
   public discoverChildren(progress: Progress<{ busy: boolean }>, token: CancellationToken) {
@@ -107,6 +107,10 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   public readonly runnable = true;
   public readonly debuggable = true;
   public readonly location = new Location(this.uri, new Position(0, 0));
+
+  public get workspaceFolder() {
+    return this.parent.workspaceFolder;
+  }
 
   constructor(
     public readonly uri: Uri,
