@@ -3,13 +3,12 @@
  *--------------------------------------------------------*/
 
 import * as ts from 'typescript';
-import { Location, Position, Range, Uri } from 'vscode';
+import { Position, Range } from 'vscode';
 import { TestCase, TestFile, TestSuite } from './testTree';
 
 const suiteNames = new Set(['suite', 'flakySuite']);
 
 export const extractTestFromNode = (
-  fileUri: Uri,
   src: ts.SourceFile,
   node: ts.Node,
   parent: TestSuite | TestFile,
@@ -36,14 +35,13 @@ export const extractTestFromNode = (
     new Position(start.line, start.character),
     new Position(end.line, end.character)
   );
-  const location = new Location(fileUri, range);
 
   if (lhs.escapedText === 'test') {
-    return new TestCase(name.text, location, generation, parent);
+    return new TestCase(name.text, range, generation, parent);
   }
 
   if (suiteNames.has(lhs.escapedText.toString())) {
-    return new TestSuite(name.text, location, generation, parent);
+    return new TestSuite(name.text, range, generation, parent);
   }
 
   return undefined;

@@ -9,6 +9,7 @@ import {
   Location,
   Position,
   Progress,
+  Range,
   RelativePattern,
   TestItem,
   TextDocument,
@@ -19,9 +20,6 @@ import {
 import { extractTestFromNode } from './sourceUtils';
 
 declare const TextDecoder: typeof import('util').TextDecoder; // node in the typings yet
-
-const locationEquals = (a: Location, b: Location) =>
-  a.uri.toString() === b.uri.toString() && a.range.isEqual(b.range);
 
 export const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
 export const idPrefix = 'ms-vscode.vscode-selfhost-test-provider/';
@@ -40,8 +38,8 @@ export abstract class TestRoot extends TestItem<TestFile> {
     return this;
   }
 
-  constructor(public readonly workspaceFolder: WorkspaceFolder) {
-    super(idPrefix, 'VS Code Unit Tests', true);
+  constructor(public readonly workspaceFolder: WorkspaceFolder, uri = workspaceFolder.uri) {
+    super(idPrefix, 'VS Code Unit Tests', uri, true);
   }
 }
 
@@ -49,12 +47,8 @@ export abstract class TestRoot extends TestItem<TestFile> {
  * The root node returned in `provideDocumentTestRoot`.
  */
 export class DocumentTestRoot extends TestRoot {
-  public get uri() {
-    return this.document.uri;
-  }
-
   constructor(workspaceFolder: WorkspaceFolder, private readonly document: TextDocument) {
-    super(workspaceFolder);
+    super(workspaceFolder, document.uri);
   }
 
   public discoverChildren(progress: Progress<{ busy: boolean }>, token: CancellationToken) {
@@ -91,13 +85,13 @@ export class WorkspaceTestRoot extends TestRoot {
     watcher.onDidDelete(uri => this.children.delete(uri.toString()));
     token.onCancellationRequested(() => watcher.dispose());
 
-    workspace.findFiles(pattern).then(files => {
-      for (const file of files) {
-        this.children.add(new TestFile(file, this, () => getContentsFromFile(file)));
-      }
-
-      progress.report({ busy: false });
-    });
+    Promise.resolve(workspace.findFiles(pattern))
+      .then(files => {
+        for (const file of files) {
+          this.children.add(new TestFile(file, this, () => getContentsFromFile(file)));
+        }
+      })
+      .finally(() => progress.report({ busy: false }));
   }
 }
 
@@ -113,11 +107,11 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   }
 
   constructor(
-    public readonly uri: Uri,
+    uri: Uri,
     public readonly parent: TestRoot,
     private readonly sourceReader: () => Promise<string>
   ) {
-    super(uri.toString(), relative(parent.workspaceFolder.uri.fsPath, uri.fsPath), true);
+    super(uri.toString(), relative(parent.workspaceFolder.uri.fsPath, uri.fsPath), uri, true);
   }
 
   /**
@@ -138,7 +132,7 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
       const thisGeneration = generation++;
       const traverse = (node: ts.Node) => {
         const parent = parents[parents.length - 1];
-        const newItem = extractTestFromNode(this.uri, ast, node, parent, thisGeneration);
+        const newItem = extractTestFromNode(ast, node, parent, thisGeneration);
         if (!newItem) {
           ts.forEachChild(node, traverse);
           return;
@@ -147,8 +141,8 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
         const existing = parent.children.get(newItem.id);
         if (existing) {
           // location is the only thing that changes in existing items
-          if (!locationEquals(existing.location, newItem.location)) {
-            existing.location = newItem.location;
+          if (!existing.range.isEqual(newItem.range)) {
+            existing.range = newItem.range;
           }
           existing.generation = thisGeneration;
           existing.invalidate();
@@ -177,7 +171,7 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   public discoverChildren(progress: Progress<{ busy: boolean }>) {
     // note that triggering changes is handled by the parent WorkspaceTestRoot
     // or DocumentTestRoot, so we don't need to set up another watcher here.
-    this.refresh().then(() => progress.report({ busy: false }));
+    this.refresh().finally(() => progress.report({ busy: false }));
   }
 
   /**
@@ -206,13 +200,14 @@ export class TestSuite extends TestItem<TestSuite | TestCase> {
 
   constructor(
     public readonly label: string,
-    public location: Location,
+    public range: Range,
     public generation: number,
     public readonly parent: TestSuite | TestFile
   ) {
     super(
       parent instanceof TestSuite ? `${parent.id} ${label}` : idPrefix + label,
       label || '<empty>',
+      parent.uri,
       true
     );
   }
@@ -224,13 +219,14 @@ export class TestCase extends TestItem {
 
   constructor(
     public readonly label: string,
-    public location: Location,
+    public range: Range,
     public generation: number,
     public readonly parent: TestFile | TestSuite
   ) {
     super(
       parent instanceof TestSuite ? `${parent.id} ${label}` : idPrefix + label,
       label || '<empty>',
+      parent.uri,
       false
     );
   }

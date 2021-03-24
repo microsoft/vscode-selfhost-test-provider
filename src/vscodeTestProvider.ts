@@ -159,11 +159,8 @@ function scanTestOutput(
 
             tests.delete(id);
             const testFirstLine = new Location(
-              tcase.location.uri,
-              new Range(
-                tcase.location.range.start,
-                new Position(tcase.location.range.start.line, 100)
-              )
+              tcase.uri,
+              new Range(tcase.range.start, new Position(tcase.range.start.line, 100))
             );
 
             tryDeriveLocation(stack || err).then(location => {
