@@ -137,14 +137,14 @@ function scanTestOutput(
           break; // no-op
         case MochaEvent.Pass:
           {
-            const id = evt[1].fullTitle;
-            const tcase = tests.get(idPrefix + id);
-            outputChannel.appendLine(` √ ${id}`);
+            const title = evt[1].fullTitle;
+            const tcase = tests.get(title);
+            outputChannel.appendLine(` √ ${title}`);
             if (tcase) {
               const state = new TestState(TestResult.Passed);
               state.duration = evt[1].duration;
               req.setState(tcase, state);
-              tests.delete(id);
+              tests.delete(title);
             }
           }
           break;
@@ -231,7 +231,7 @@ async function getPendingTestMap(tests: ReadonlyArray<VSCodeTest>) {
         await child.refresh();
         queue.push(child.children);
       } else if (child instanceof TestCase) {
-        titleMap.set(child.id, child);
+        titleMap.set(child.fullLabel, child);
       } else {
         queue.push(child.children);
       }

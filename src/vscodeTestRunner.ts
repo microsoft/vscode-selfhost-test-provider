@@ -9,7 +9,6 @@ import { debug, DebugSession, WorkspaceFolder } from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
 import {
   DocumentTestRoot,
-  idPrefix,
   TestCase,
   TestFile,
   TestSuite,
@@ -92,9 +91,7 @@ export abstract class VSCodeTestRunner {
       if (test instanceof WorkspaceTestRoot) {
         return args;
       } else if (test instanceof TestCase || test instanceof TestSuite) {
-        grepRe.push(
-          escapeRe(test.id.slice(idPrefix.length)) + (test instanceof TestCase ? '$' : ' ')
-        );
+        grepRe.push(escapeRe(test.fullLabel) + (test instanceof TestCase ? '$' : ' '));
       } else if (test instanceof TestFile || test instanceof DocumentTestRoot) {
         runPaths.push(
           path.relative(test.workspaceFolder.uri.fsPath, test.uri.fsPath).replace(/\\/g, '/')

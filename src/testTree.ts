@@ -194,9 +194,13 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   }
 }
 
+const getFullLabel = (parent: TestSuite | TestFile, label: string) =>
+  parent instanceof TestSuite ? `${parent.label} ${label}` : label;
+
 export class TestSuite extends TestItem<TestSuite | TestCase> {
   public readonly runnable = true;
   public readonly debuggable = true;
+  public readonly fullLabel = getFullLabel(this.parent, this.label);
 
   constructor(
     public readonly label: string,
@@ -205,7 +209,10 @@ export class TestSuite extends TestItem<TestSuite | TestCase> {
     public readonly parent: TestSuite | TestFile
   ) {
     super(
-      parent instanceof TestSuite ? `${parent.id} ${label}` : idPrefix + label,
+      JSON.stringify({
+        label: getFullLabel(parent, label),
+        uri: parent.uri,
+      }),
       label || '<empty>',
       parent.uri,
       true
@@ -216,6 +223,7 @@ export class TestSuite extends TestItem<TestSuite | TestCase> {
 export class TestCase extends TestItem {
   public readonly runnable = true;
   public readonly debuggable = true;
+  public readonly fullLabel = getFullLabel(this.parent, this.label);
 
   constructor(
     public readonly label: string,
@@ -224,7 +232,10 @@ export class TestCase extends TestItem {
     public readonly parent: TestFile | TestSuite
   ) {
     super(
-      parent instanceof TestSuite ? `${parent.id} ${label}` : idPrefix + label,
+      JSON.stringify({
+        label: getFullLabel(parent, label),
+        uri: parent.uri,
+      }),
       label || '<empty>',
       parent.uri,
       false
