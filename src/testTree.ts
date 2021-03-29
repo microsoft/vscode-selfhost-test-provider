@@ -2,7 +2,7 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
-import { relative } from 'path';
+import { join, relative } from 'path';
 import * as ts from 'typescript';
 import {
   CancellationToken,
@@ -111,7 +111,12 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
     public readonly parent: TestRoot,
     private readonly sourceReader: () => Promise<string>
   ) {
-    super(uri.toString(), relative(parent.workspaceFolder.uri.fsPath, uri.fsPath), uri, true);
+    super(
+      uri.toString(),
+      relative(join(parent.workspaceFolder.uri.fsPath, 'src', 'vs'), uri.fsPath),
+      uri,
+      true
+    );
   }
 
   /**
