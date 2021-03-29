@@ -26,7 +26,6 @@ import { MochaEvent, TestOutputScanner } from './testOutputScanner';
 import {
   DocumentTestRoot,
   getContentsFromFile,
-  idPrefix,
   TestCase,
   TestFile,
   TestRoot,
@@ -151,7 +150,7 @@ function scanTestOutput(
         case MochaEvent.Fail:
           {
             const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
-            const tcase = tests.get(idPrefix + id);
+            const tcase = tests.get(id);
             outputChannel.appendLine(` x ${id}`);
             if (!tcase) {
               return;
@@ -166,8 +165,8 @@ function scanTestOutput(
             tryDeriveLocation(stack || err).then(location => {
               const message = new TestMessage(tryMakeMarkdown(err));
               message.location = location ?? testFirstLine;
-              message.actualOutput = actual;
-              message.expectedOutput = expected;
+              message.actualOutput = String(actual);
+              message.expectedOutput = String(expected);
               req.setState(tcase, { duration, messages: [message], state: TestResult.Failed });
               outputChannel.appendLine(stack || err);
             });
