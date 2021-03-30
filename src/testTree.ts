@@ -199,8 +199,8 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   }
 }
 
-const getFullLabel = (parent: TestSuite | TestFile, label: string) =>
-  parent instanceof TestSuite ? `${parent.label} ${label}` : label;
+const getFullLabel = (parent: TestSuite | TestFile, label: string): string =>
+  parent instanceof TestSuite ? `${parent.fullLabel} ${label}` : label;
 
 export class TestSuite extends TestItem<TestSuite | TestCase> {
   public readonly runnable = true;
