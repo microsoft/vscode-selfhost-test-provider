@@ -13,9 +13,8 @@ import {
   Range,
   TestMessage,
   TestProvider,
-  TestResult,
-  TestRun,
-  TestState,
+  TestResultState,
+  TestRunOptions,
   TextDocument,
   Uri,
   window,
@@ -64,7 +63,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
     return new DocumentTestRoot(folder, document);
   }
 
-  public async runTests(req: TestRun<VSCodeTest>, cancellationToken: CancellationToken) {
+  public async runTests(req: TestRunOptions<VSCodeTest>, cancellationToken: CancellationToken) {
     let maybeRoot = req.tests[0];
     while (!(maybeRoot instanceof TestRoot)) {
       maybeRoot = maybeRoot.parent;
@@ -89,7 +88,7 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
       );
 
       // some error:
-      if (outcome !== TestResult.Skipped) {
+      if (outcome !== TestResultState.Skipped) {
         output.show();
       }
     }));
@@ -106,24 +105,24 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
 
 function scanTestOutput(
   outputChannel: OutputChannel,
-  req: TestRun<VSCodeTest>,
+  req: TestRunOptions<VSCodeTest>,
   scanner: TestOutputScanner,
   tests: Map<string, TestCase>,
   cancellation: CancellationToken
-): Promise<TestResult> {
+): Promise<TestResultState> {
   if (cancellation.isCancellationRequested) {
     scanner.dispose();
-    return Promise.resolve(TestResult.Skipped);
+    return Promise.resolve(TestResultState.Skipped);
   }
 
-  return new Promise<TestResult>(resolve => {
+  return new Promise<TestResultState>(resolve => {
     cancellation.onCancellationRequested(() => {
-      resolve(TestResult.Skipped);
+      resolve(TestResultState.Skipped);
     });
 
     scanner.onRunnerError(err => {
       outputChannel.appendLine(err);
-      resolve(TestResult.Errored);
+      resolve(TestResultState.Errored);
     });
 
     scanner.onOtherOutput(str => {
@@ -140,9 +139,7 @@ function scanTestOutput(
             const tcase = tests.get(title);
             outputChannel.appendLine(` √ ${title}`);
             if (tcase) {
-              const state = new TestState(TestResult.Passed);
-              state.duration = evt[1].duration;
-              req.setState(tcase, state);
+              req.setState(tcase, TestResultState.Passed, evt[1].duration);
               tests.delete(title);
             }
           }
@@ -167,13 +164,14 @@ function scanTestOutput(
               message.location = location ?? testFirstLine;
               message.actualOutput = String(actual);
               message.expectedOutput = String(expected);
-              req.setState(tcase, { duration, messages: [message], state: TestResult.Failed });
+              req.appendMessage(tcase, message);
+              req.setState(tcase, TestResultState.Failed, duration);
               outputChannel.appendLine(stack || err);
             });
           }
           break;
         case MochaEvent.End:
-          resolve(TestResult.Skipped);
+          resolve(TestResultState.Skipped);
           break;
       }
     });

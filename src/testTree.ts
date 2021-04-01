@@ -59,7 +59,7 @@ export class DocumentTestRoot extends TestRoot {
 
     const changeListener = workspace.onDidChangeTextDocument(e => {
       if (e.document === this.document) {
-        file.refresh();
+        file.refresh(true);
       }
     });
 
@@ -81,7 +81,7 @@ export class WorkspaceTestRoot extends TestRoot {
     watcher.onDidCreate(uri =>
       this.children.add(new TestFile(uri, this, () => getContentsFromFile(uri)))
     );
-    watcher.onDidChange(uri => this.children.get(uri.toString())?.refresh());
+    watcher.onDidChange(uri => this.children.get(uri.toString())?.refresh(true));
     watcher.onDidDelete(uri => this.children.delete(uri.toString()));
     token.onCancellationRequested(() => watcher.dispose());
 
@@ -122,7 +122,7 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
-  public async refresh() {
+  public async refresh(invalidate = false) {
     try {
       const decoded = await this.sourceReader();
       const ast = ts.createSourceFile(
@@ -150,7 +150,9 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
             existing.range = newItem.range;
           }
           existing.generation = thisGeneration;
-          existing.invalidate();
+          if (invalidate) {
+            existing.invalidate();
+          }
         } else {
           parent.children.add(newItem);
         }
