@@ -7,7 +7,6 @@ import {
   CancellationToken,
   Location,
   MarkdownString,
-  OutputChannel,
   Position,
   ProviderResult,
   Range,
@@ -17,7 +16,6 @@ import {
   TestRunOptions,
   TextDocument,
   Uri,
-  window,
   workspace,
   WorkspaceFolder,
 } from 'vscode';
@@ -34,7 +32,6 @@ import {
 import { PlatformTestRunner } from './vscodeTestRunner';
 
 export class VscodeTestProvider implements TestProvider<VSCodeTest> {
-  private outputChannel?: OutputChannel;
   private queue = Promise.resolve();
 
   /**
@@ -74,37 +71,17 @@ export class VscodeTestProvider implements TestProvider<VSCodeTest> {
 
     const pending = await getPendingTestMap(req.tests);
     return (this.queue = this.queue.then(async () => {
-      const output = this.getOutputChannel();
-      output.appendLine('');
-      output.appendLine(`Starting test run at ${new Date().toLocaleString()}`);
-      output.appendLine('');
-
-      const outcome = await scanTestOutput(
-        output,
+      await scanTestOutput(
         req,
         req.debug ? await runner.debug(req.tests) : await runner.run(req.tests),
         pending,
         cancellationToken
       );
-
-      // some error:
-      if (outcome !== TestResultState.Skipped) {
-        output.show();
-      }
     }));
-  }
-
-  private getOutputChannel() {
-    if (!this.outputChannel) {
-      this.outputChannel = window.createOutputChannel('VS Code Tests');
-    }
-
-    return this.outputChannel;
   }
 }
 
 function scanTestOutput(
-  outputChannel: OutputChannel,
   req: TestRunOptions<VSCodeTest>,
   scanner: TestOutputScanner,
   tests: Map<string, TestCase>,
@@ -121,12 +98,12 @@ function scanTestOutput(
     });
 
     scanner.onRunnerError(err => {
-      outputChannel.appendLine(err);
+      req.appendOutput(err + '\r\n');
       resolve(TestResultState.Errored);
     });
 
     scanner.onOtherOutput(str => {
-      outputChannel.appendLine(str);
+      req.appendOutput(str + '\r\n');
     });
 
     scanner.onMochaEvent(evt => {
@@ -137,7 +114,7 @@ function scanTestOutput(
           {
             const title = evt[1].fullTitle;
             const tcase = tests.get(title);
-            outputChannel.appendLine(` √ ${title}`);
+            req.appendOutput(` √ ${title}\r\n`);
             if (tcase) {
               req.setState(tcase, TestResultState.Passed, evt[1].duration);
               tests.delete(title);
@@ -148,7 +125,7 @@ function scanTestOutput(
           {
             const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
             const tcase = tests.get(id);
-            outputChannel.appendLine(` x ${id}`);
+            req.appendOutput(` x ${id}\r\n`);
             if (!tcase) {
               return;
             }
@@ -166,7 +143,7 @@ function scanTestOutput(
               message.expectedOutput = String(expected);
               req.appendMessage(tcase, message);
               req.setState(tcase, TestResultState.Failed, duration);
-              outputChannel.appendLine(stack || err);
+              req.appendOutput(`${stack || err}\r\n`);
             });
           }
           break;
