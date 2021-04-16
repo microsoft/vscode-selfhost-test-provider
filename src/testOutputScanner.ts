@@ -69,7 +69,7 @@ export class TestOutputScanner implements Disposable {
    */
   public readonly onRunnerError = this.onErrorEmitter.event;
 
-  constructor(private readonly process: ChildProcessWithoutNullStreams) {
+  constructor(private readonly process: ChildProcessWithoutNullStreams, private args?: string[]) {
     process.stdout.pipe(split()).on('data', this.processData);
     process.stderr.pipe(split()).on('data', this.processData);
     process.on('error', e => this.onErrorEmitter.fire(e.message));
@@ -88,6 +88,11 @@ export class TestOutputScanner implements Disposable {
   }
 
   protected readonly processData = (data: string) => {
+    if (this.args) {
+      this.outputEventEmitter.fire(`./scripts/test ${this.args.join(' ')}`);
+      this.args = undefined;
+    }
+
     try {
       const parsed = JSON.parse(data) as unknown;
       if (parsed instanceof Array && parsed.length === 2 && typeof parsed[0] === 'string') {

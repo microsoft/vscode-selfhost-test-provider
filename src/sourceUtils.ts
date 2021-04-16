@@ -3,7 +3,7 @@
  *--------------------------------------------------------*/
 
 import * as ts from 'typescript';
-import { Position, Range } from 'vscode';
+import * as vscode from 'vscode';
 import { TestCase, TestFile, TestSuite } from './testTree';
 
 const suiteNames = new Set(['suite', 'flakySuite']);
@@ -11,7 +11,7 @@ const suiteNames = new Set(['suite', 'flakySuite']);
 export const extractTestFromNode = (
   src: ts.SourceFile,
   node: ts.Node,
-  parent: TestSuite | TestFile,
+  parent: vscode.TestItem<TestSuite | TestFile>,
   generation: number
 ) => {
   if (!ts.isCallExpression(node)) {
@@ -31,17 +31,17 @@ export const extractTestFromNode = (
 
   const start = src.getLineAndCharacterOfPosition(name.pos);
   const end = src.getLineAndCharacterOfPosition(func.end);
-  const range = new Range(
-    new Position(start.line, start.character),
-    new Position(end.line, end.character)
+  const range = new vscode.Range(
+    new vscode.Position(start.line, start.character),
+    new vscode.Position(end.line, end.character)
   );
 
   if (lhs.escapedText === 'test') {
-    return new TestCase(name.text, range, generation, parent);
+    return TestCase.create(name.text, range, generation, parent);
   }
 
   if (suiteNames.has(lhs.escapedText.toString())) {
-    return new TestSuite(name.text, range, generation, parent);
+    return TestSuite.create(name.text, range, generation, parent);
   }
 
   return undefined;

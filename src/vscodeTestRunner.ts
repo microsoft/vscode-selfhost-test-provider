@@ -5,7 +5,7 @@
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { debug, DebugSession, WorkspaceFolder } from 'vscode';
+import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
 import {
   DocumentTestRoot,
@@ -26,22 +26,24 @@ const TEST_SCRIPT_PATH = 'test/unit/electron/index.js';
 const ATTACH_CONFIG_NAME = 'Attach to VS Code';
 
 export abstract class VSCodeTestRunner {
-  constructor(protected readonly repoLocation: WorkspaceFolder) {}
+  constructor(protected readonly repoLocation: vscode.WorkspaceFolder) {}
 
-  public async run(tests: ReadonlyArray<VSCodeTest>) {
+  public async run(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
+    const args = this.prepareArguments(tests);
     const cp = spawn(await this.binaryPath(), this.prepareArguments(tests), {
       cwd: this.repoLocation.uri.fsPath,
       stdio: 'pipe',
       env: this.getEnvironment(),
     });
 
-    return new TestOutputScanner(cp);
+    return new TestOutputScanner(cp, args);
   }
 
-  public async debug(tests: ReadonlyArray<VSCodeTest>) {
+  public async debug(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
+    const args = [...this.prepareArguments(tests), '--remote-debugging-port=9222', '--timeout=0'];
     const cp = spawn(
       await this.binaryPath(),
-      [...this.prepareArguments(tests), '--remote-debugging-port=9222', '--timeout=0'],
+      args,
       {
         cwd: this.repoLocation.uri.fsPath,
         stdio: 'pipe',
@@ -49,29 +51,29 @@ export abstract class VSCodeTestRunner {
       }
     );
 
-    debug.startDebugging(this.repoLocation, ATTACH_CONFIG_NAME);
+    vscode.debug.startDebugging(this.repoLocation, ATTACH_CONFIG_NAME);
 
     let exited = false;
-    let session: DebugSession | undefined;
+    let session: vscode.DebugSession | undefined;
     cp.once('exit', () => {
       exited = true;
       if (session) {
-        debug.stopDebugging(session);
+        vscode.debug.stopDebugging(session);
       }
     });
 
-    const listener = debug.onDidStartDebugSession(s => {
+    const listener = vscode.debug.onDidStartDebugSession(s => {
       if (s.name === ATTACH_CONFIG_NAME) {
         listener.dispose();
         if (exited) {
-          debug.stopDebugging(session);
+          vscode.debug.stopDebugging(session);
         } else {
           session = s;
         }
       }
     });
 
-    return new TestOutputScanner(cp);
+    return new TestOutputScanner(cp, args);
   }
 
   private getEnvironment(): NodeJS.ProcessEnv {
@@ -82,19 +84,19 @@ export abstract class VSCodeTestRunner {
     };
   }
 
-  private prepareArguments(tests: ReadonlyArray<VSCodeTest>) {
+  private prepareArguments(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
     const args = [TEST_SCRIPT_PATH, ...this.getDefaultArgs(), '--reporter', 'full-json-stream'];
 
     const grepRe: string[] = [];
     const runPaths: string[] = [];
     for (const test of tests) {
-      if (test instanceof WorkspaceTestRoot) {
+      if (test.data instanceof WorkspaceTestRoot) {
         return args;
-      } else if (test instanceof TestCase || test instanceof TestSuite) {
-        grepRe.push(escapeRe(test.fullLabel) + (test instanceof TestCase ? '$' : ' '));
-      } else if (test instanceof TestFile || test instanceof DocumentTestRoot) {
+      } else if (test.data instanceof TestCase || test.data instanceof TestSuite) {
+        grepRe.push(escapeRe(test.data.fullLabel) + (test.data instanceof TestCase ? '$' : ' '));
+      } else if (test.data instanceof TestFile || test.data instanceof DocumentTestRoot) {
         runPaths.push(
-          path.relative(test.workspaceFolder.uri.fsPath, test.uri.fsPath).replace(/\\/g, '/')
+          path.relative(test.data.workspaceFolder.uri.fsPath, test.uri.fsPath).replace(/\\/g, '/')
         );
       }
     }

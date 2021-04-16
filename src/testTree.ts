@@ -4,137 +4,171 @@
 
 import { join, relative } from 'path';
 import * as ts from 'typescript';
-import {
-  CancellationToken,
-  Location,
-  Position,
-  Progress,
-  Range,
-  RelativePattern,
-  TestItem,
-  TextDocument,
-  Uri,
-  workspace,
-  WorkspaceFolder,
-} from 'vscode';
+import { TextDecoder } from 'util';
+import * as vscode from 'vscode';
 import { extractTestFromNode } from './sourceUtils';
 
-declare const TextDecoder: typeof import('util').TextDecoder; // node in the typings yet
+const textDecoder = new TextDecoder('utf-8');
+const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
 
-export const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
-export const idPrefix = 'ms-vscode.vscode-selfhost-test-provider/';
+export class TestRoot {
+  constructor(public readonly workspaceFolder: vscode.WorkspaceFolder) {}
+}
 
-export const getContentsFromFile = async (file: Uri) => {
-  const contents = await workspace.fs.readFile(file);
-  return new TextDecoder('utf-8').decode(contents);
+export class WorkspaceTestRoot extends TestRoot {
+  public static create(workspaceFolder: vscode.WorkspaceFolder) {
+    const item = vscode.test.createTestItem<WorkspaceTestRoot, TestFile>(
+      { id: 'vscodetests', label: 'VS Code Tests', uri: workspaceFolder.uri },
+      new WorkspaceTestRoot(workspaceFolder)
+    );
+
+    item.status = vscode.TestItemStatus.Pending;
+    item.resolveHandler = token => {
+      const pattern = new vscode.RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      const contentChange = new vscode.EventEmitter<vscode.Uri>();
+
+      watcher.onDidCreate(uri =>
+        item.addChild(
+          TestFile.create(uri, getContentFromFilesystem, contentChange.event, workspaceFolder)
+        )
+      );
+      watcher.onDidChange(uri => contentChange.fire(uri));
+      watcher.onDidDelete(uri => item.children.get(uri.toString())?.dispose());
+      token.onCancellationRequested(() => {
+        item.status = vscode.TestItemStatus.Pending;
+        watcher.dispose();
+      });
+
+      vscode.workspace.findFiles(pattern).then(files => {
+        for (const file of files) {
+          item.addChild(
+            TestFile.create(file, getContentFromFilesystem, contentChange.event, workspaceFolder)
+          );
+        }
+
+        item.status = vscode.TestItemStatus.Resolved;
+      });
+    };
+
+    return item;
+  }
+}
+
+export class DocumentTestRoot extends TestRoot {
+  public static create(document: vscode.TextDocument, workspaceFolder: vscode.WorkspaceFolder) {
+    const item = vscode.test.createTestItem<DocumentTestRoot, TestFile>(
+      { id: 'vscodetests', label: 'VS Code Tests', uri: document.uri },
+      new DocumentTestRoot(workspaceFolder)
+    );
+
+    item.status = vscode.TestItemStatus.Pending;
+    item.resolveHandler = token => {
+      const contentChange = new vscode.EventEmitter<vscode.Uri>();
+      const changeListener = vscode.workspace.onDidChangeTextDocument(e => {
+        contentChange.fire(e.document.uri);
+      });
+
+      const file = TestFile.create(
+        document.uri,
+        () => Promise.resolve(document.getText()),
+        contentChange.event,
+        workspaceFolder
+      );
+      item.addChild(file);
+
+      token.onCancellationRequested(() => {
+        changeListener.dispose();
+        item.status = vscode.TestItemStatus.Pending;
+      });
+
+      item.status = vscode.TestItemStatus.Resolved;
+    };
+
+    return item;
+  }
+}
+
+const getFullLabel = (parent: vscode.TestItem<TestSuite | TestFile>, label: string): string =>
+  parent.data instanceof TestSuite ? `${parent.data.fullLabel} ${label}` : label;
+
+let generationCounter = 0;
+
+type ContentGetter = (uri: vscode.Uri) => Promise<string>;
+
+export const getContentFromFilesystem: ContentGetter = async uri => {
+  try {
+    const rawContent = await vscode.workspace.fs.readFile(uri);
+    return textDecoder.decode(rawContent);
+  } catch (e) {
+    console.warn(`Error providing tests for ${uri.fsPath}`, e);
+    return '';
+  }
 };
 
-export abstract class TestRoot extends TestItem<TestFile> {
-  public readonly runnable = true;
-  public readonly debuggable = true;
-  public readonly parent = undefined;
-
-  public get root() {
-    return this;
-  }
-
-  constructor(public readonly workspaceFolder: WorkspaceFolder, uri = workspaceFolder.uri) {
-    super(idPrefix, 'VS Code Unit Tests', uri, true);
-  }
-}
-
-/**
- * The root node returned in `provideDocumentTestRoot`.
- */
-export class DocumentTestRoot extends TestRoot {
-  constructor(workspaceFolder: WorkspaceFolder, private readonly document: TextDocument) {
-    super(workspaceFolder, document.uri);
-  }
-
-  public discoverChildren(progress: Progress<{ busy: boolean }>, token: CancellationToken) {
-    const file = new TestFile(this.document.uri, this, () =>
-      Promise.resolve(this.document.getText())
-    );
-    this.children.add(file);
-
-    const changeListener = workspace.onDidChangeTextDocument(e => {
-      if (e.document === this.document) {
-        file.refresh(true);
-      }
+export class TestFile {
+  public static create(
+    uri: vscode.Uri,
+    contentGetter: ContentGetter,
+    onContentChange: vscode.Event<vscode.Uri>,
+    workspaceFolder: vscode.WorkspaceFolder
+  ) {
+    const item = vscode.test.createTestItem<TestFile>({
+      id: `vscodetests/${uri}`,
+      label: relative(join(workspaceFolder.uri.fsPath, 'src', 'vs'), uri.fsPath),
+      uri,
     });
 
-    token.onCancellationRequested(() => changeListener.dispose());
-    progress.report({ busy: false });
-  }
-}
+    item.data = new TestFile(workspaceFolder, contentGetter, item);
+    item.status = vscode.TestItemStatus.Pending;
+    item.resolveHandler = token => {
+      const doRefresh = (invalidate: boolean) => {
+        item.data.refresh(invalidate).then(() => {
+          if (!token.isCancellationRequested) {
+            item.status = vscode.TestItemStatus.Resolved;
+          }
+        });
+      };
 
-/**
- * The root node returned in `provideWorkspaceTestRoot`.
- */
-export class WorkspaceTestRoot extends TestRoot {
-  /**
-   * @override
-   */
-  public discoverChildren(progress: Progress<{ busy: boolean }>, token: CancellationToken) {
-    const pattern = new RelativePattern(this.workspaceFolder, TEST_FILE_PATTERN);
-    const watcher = workspace.createFileSystemWatcher(pattern);
-    watcher.onDidCreate(uri =>
-      this.children.add(new TestFile(uri, this, () => getContentsFromFile(uri)))
-    );
-    watcher.onDidChange(uri => this.children.get(uri.toString())?.refresh(true));
-    watcher.onDidDelete(uri => this.children.delete(uri.toString()));
-    token.onCancellationRequested(() => watcher.dispose());
-
-    Promise.resolve(workspace.findFiles(pattern))
-      .then(files => {
-        for (const file of files) {
-          this.children.add(new TestFile(file, this, () => getContentsFromFile(file)));
+      const listener = onContentChange(uri => {
+        if (uri.toString() === uri.toString()) {
+          doRefresh(true);
         }
-      })
-      .finally(() => progress.report({ busy: false }));
-  }
-}
+      });
 
-let generation = 0;
+      token.onCancellationRequested(() => {
+        item.status = vscode.TestItemStatus.Pending;
+        listener.dispose();
+      });
 
-export class TestFile extends TestItem<TestSuite | TestCase> {
-  public readonly runnable = true;
-  public readonly debuggable = true;
-  public readonly location = new Location(this.uri, new Position(0, 0));
+      doRefresh(false);
+    };
 
-  public get workspaceFolder() {
-    return this.parent.workspaceFolder;
+    return item;
   }
 
   constructor(
-    uri: Uri,
-    public readonly parent: TestRoot,
-    private readonly sourceReader: () => Promise<string>
-  ) {
-    super(
-      uri.toString(),
-      relative(join(parent.workspaceFolder.uri.fsPath, 'src', 'vs'), uri.fsPath),
-      uri,
-      true
-    );
-  }
+    public readonly workspaceFolder: vscode.WorkspaceFolder,
+    private readonly getContent: ContentGetter,
+    private readonly item: vscode.TestItem<TestFile>
+  ) {}
 
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
   public async refresh(invalidate = false) {
     try {
-      const decoded = await this.sourceReader();
+      const decoded = await this.getContent(this.item.uri);
       const ast = ts.createSourceFile(
-        this.uri.path.split('/').pop()!,
+        this.item.uri.path.split('/').pop()!,
         decoded,
         ts.ScriptTarget.ESNext,
         false,
         ts.ScriptKind.TS
       );
 
-      const parents: (TestFile | TestSuite)[] = [this];
-      const thisGeneration = generation++;
+      const parents: vscode.TestItem<TestFile | TestSuite>[] = [this.item];
+      const thisGeneration = generationCounter++;
       const traverse = (node: ts.Node) => {
         const parent = parents[parents.length - 1];
         const newItem = extractTestFromNode(ast, node, parent, thisGeneration);
@@ -146,19 +180,17 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
         const existing = parent.children.get(newItem.id);
         if (existing) {
           // location is the only thing that changes in existing items
-          if (!existing.range.isEqual(newItem.range)) {
-            existing.range = newItem.range;
-          }
-          existing.generation = thisGeneration;
+          existing.range = newItem.range;
+          existing.data.generation = thisGeneration;
           if (invalidate) {
             existing.invalidate();
           }
         } else {
-          parent.children.add(newItem);
+          parent.addChild(newItem);
         }
 
         const finalItem = existing || newItem;
-        if (finalItem instanceof TestSuite) {
+        if (finalItem.data instanceof TestSuite) {
           parents.push(finalItem);
           ts.forEachChild(node, traverse);
           parents.pop();
@@ -168,17 +200,8 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
       ts.forEachChild(ast, traverse);
       this.prune(thisGeneration);
     } catch (e) {
-      console.warn('Error reading tests in file', this.uri.toString(), e);
+      this.item.error = String(e.stack || e.message);
     }
-  }
-
-  /**
-   * @override
-   */
-  public discoverChildren(progress: Progress<{ busy: boolean }>) {
-    // note that triggering changes is handled by the parent WorkspaceTestRoot
-    // or DocumentTestRoot, so we don't need to set up another watcher here.
-    this.refresh().finally(() => progress.report({ busy: false }));
   }
 
   /**
@@ -188,12 +211,12 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
    * longer in this generation.
    */
   private prune(thisGeneration: number) {
-    const queue: (TestSuite | TestFile)[] = [this];
+    const queue: vscode.TestItem<TestFile | TestSuite, TestSuite | TestCase>[] = [this.item];
     for (const parent of queue) {
-      for (const child of parent.children) {
-        if (child.generation < thisGeneration) {
-          parent.children.delete(child);
-        } else if (child instanceof TestSuite) {
+      for (const child of parent.children.values()) {
+        if (child.data.generation < thisGeneration) {
+          child.dispose();
+        } else if (child.data instanceof TestSuite) {
           queue.push(child);
         }
       }
@@ -201,53 +224,56 @@ export class TestFile extends TestItem<TestSuite | TestCase> {
   }
 }
 
-const getFullLabel = (parent: TestSuite | TestFile, label: string): string =>
-  parent instanceof TestSuite ? `${parent.fullLabel} ${label}` : label;
-
-export class TestSuite extends TestItem<TestSuite | TestCase> {
-  public readonly runnable = true;
-  public readonly debuggable = true;
-  public readonly fullLabel = getFullLabel(this.parent, this.label);
-
-  constructor(
-    public readonly label: string,
-    public range: Range,
-    public generation: number,
-    public readonly parent: TestSuite | TestFile
+export class TestSuite {
+  public static create(
+    label: string,
+    range: vscode.Range,
+    generation: number,
+    parent: vscode.TestItem<TestSuite | TestFile>
   ) {
-    super(
-      JSON.stringify({
-        label: getFullLabel(parent, label),
+    const item = vscode.test.createTestItem(
+      {
+        id: JSON.stringify({
+          label: getFullLabel(parent, label),
+          uri: parent.uri,
+        }),
+        label,
         uri: parent.uri,
-      }),
-      label || '<empty>',
-      parent.uri,
-      true
+      },
+      new TestSuite(generation, getFullLabel(parent, label))
     );
+
+    item.range = range;
+    return item;
   }
+
+  constructor(public generation: number, public fullLabel: string) {}
 }
 
-export class TestCase extends TestItem {
-  public readonly runnable = true;
-  public readonly debuggable = true;
-  public readonly fullLabel = getFullLabel(this.parent, this.label);
-
-  constructor(
-    public readonly label: string,
-    public range: Range,
-    public generation: number,
-    public readonly parent: TestFile | TestSuite
+export class TestCase {
+  public static create(
+    label: string,
+    range: vscode.Range,
+    generation: number,
+    parent: vscode.TestItem<TestSuite | TestFile>
   ) {
-    super(
-      JSON.stringify({
-        label: getFullLabel(parent, label),
+    const item = vscode.test.createTestItem(
+      {
+        id: JSON.stringify({
+          label: getFullLabel(parent, label),
+          uri: parent.uri,
+        }),
+        label,
         uri: parent.uri,
-      }),
-      label || '<empty>',
-      parent.uri,
-      false
+      },
+      new TestCase(generation, getFullLabel(parent, label))
     );
+
+    item.range = range;
+    return item;
   }
+
+  constructor(public generation: number, public fullLabel: string) {}
 }
 
-export type VSCodeTest = TestRoot | TestFile | TestSuite | TestCase;
+export type VSCodeTest = WorkspaceTestRoot | DocumentTestRoot | TestFile | TestSuite | TestCase;

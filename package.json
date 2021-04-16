@@ -59,6 +59,7 @@
 		"webpack-cli": "^4.2.0"
 	},
 	"dependencies": {
+		"ansi-styles": "^6.0.0",
 		"split2": "^3.2.2",
 		"typescript": "^4.1.3"
 	}

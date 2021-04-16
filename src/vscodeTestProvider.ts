@@ -2,27 +2,13 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
+import styles from 'ansi-styles';
 import { SourceMapConsumer } from 'source-map';
-import {
-  CancellationToken,
-  Location,
-  MarkdownString,
-  Position,
-  ProviderResult,
-  Range,
-  TestMessage,
-  TestProvider,
-  TestResultState,
-  TestRunOptions,
-  TextDocument,
-  Uri,
-  workspace,
-  WorkspaceFolder,
-} from 'vscode';
+import * as vscode from 'vscode';
 import { MochaEvent, TestOutputScanner } from './testOutputScanner';
 import {
   DocumentTestRoot,
-  getContentsFromFile,
+  getContentFromFilesystem,
   TestCase,
   TestFile,
   TestRoot,
@@ -31,129 +17,150 @@ import {
 } from './testTree';
 import { PlatformTestRunner } from './vscodeTestRunner';
 
-export class VscodeTestProvider implements TestProvider<VSCodeTest> {
+export class VSCodeTestController implements vscode.TestController<VSCodeTest> {
   private queue = Promise.resolve();
 
   /**
    * @inheritdoc
    */
-  public getParent(test: VSCodeTest): VSCodeTest | undefined {
-    return test.parent;
+  public createWorkspaceTestRoot(workspaceFolder: vscode.WorkspaceFolder) {
+    return WorkspaceTestRoot.create(workspaceFolder);
   }
 
   /**
    * @inheritdoc
    */
-  public provideWorkspaceTestRoot(workspaceFolder: WorkspaceFolder): ProviderResult<VSCodeTest> {
-    return new WorkspaceTestRoot(workspaceFolder);
-  }
-
-  /**
-   * @inheritdoc
-   */
-  public provideDocumentTestRoot(document: TextDocument): ProviderResult<VSCodeTest> {
-    const folder = workspace.getWorkspaceFolder(document.uri);
+  public createDocumentTestRoot(document: vscode.TextDocument) {
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
     if (!folder) {
       return;
     }
 
-    return new DocumentTestRoot(folder, document);
+    return DocumentTestRoot.create(document, folder);
   }
 
-  public async runTests(req: TestRunOptions<VSCodeTest>, cancellationToken: CancellationToken) {
+  public async runTests(
+    req: vscode.TestRunRequest<VSCodeTest>,
+    cancellationToken: vscode.CancellationToken
+  ) {
     let maybeRoot = req.tests[0];
-    while (!(maybeRoot instanceof TestRoot)) {
-      maybeRoot = maybeRoot.parent;
+    while (!(maybeRoot.data instanceof TestRoot)) {
+      maybeRoot = maybeRoot.parent!;
     }
 
-    const root = maybeRoot as TestRoot;
-    const runner = new PlatformTestRunner(root.workspaceFolder);
+    const root = maybeRoot as vscode.TestItem<TestRoot>;
+    const runner = new PlatformTestRunner(root.data.workspaceFolder);
+    const map = await getPendingTestMap(req.tests);
+    const task = vscode.test.createTestRunTask(req);
+    for (const test of map.values()) {
+      task.setState(test, vscode.TestResultState.Queued);
+    }
 
-    const pending = await getPendingTestMap(req.tests);
     return (this.queue = this.queue.then(async () => {
       await scanTestOutput(
-        req,
+        map,
+        task,
         req.debug ? await runner.debug(req.tests) : await runner.run(req.tests),
-        pending,
         cancellationToken
       );
     }));
   }
 }
 
-function scanTestOutput(
-  req: TestRunOptions<VSCodeTest>,
+async function scanTestOutput(
+  tests: Map<string, vscode.TestItem<VSCodeTest>>,
+  task: vscode.TestRunTask<VSCodeTest>,
   scanner: TestOutputScanner,
-  tests: Map<string, TestCase>,
-  cancellation: CancellationToken
-): Promise<TestResultState> {
-  if (cancellation.isCancellationRequested) {
+  cancellation: vscode.CancellationToken
+): Promise<void> {
+  const locationDerivations: Promise<void>[] = [];
+  try {
+    if (cancellation.isCancellationRequested) {
+      return;
+    }
+
+    await new Promise<void>(resolve => {
+      cancellation.onCancellationRequested(() => {
+        resolve();
+      });
+
+      scanner.onRunnerError(err => {
+        task.appendOutput(err + '\r\n');
+        resolve();
+      });
+
+      scanner.onOtherOutput(str => {
+        task.appendOutput(str + '\r\n');
+      });
+
+      scanner.onMochaEvent(evt => {
+        switch (evt[0]) {
+          case MochaEvent.Start:
+            break; // no-op
+          case MochaEvent.Pass:
+            {
+              const title = evt[1].fullTitle;
+              const tcase = tests.get(title);
+              task.appendOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
+              if (tcase) {
+                task.setState(tcase, vscode.TestResultState.Passed, evt[1].duration);
+                tests.delete(title);
+              }
+            }
+            break;
+          case MochaEvent.Fail:
+            {
+              const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
+              const tcase = tests.get(id);
+              task.appendOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
+              const rawErr = stack || err;
+              if (rawErr) {
+                task.appendOutput(forceCRLF(rawErr));
+              }
+
+              if (!tcase) {
+                return;
+              }
+
+              tests.delete(id);
+              const testFirstLine =
+                tcase.range &&
+                new vscode.Location(
+                  tcase.uri,
+                  new vscode.Range(
+                    tcase.range.start,
+                    new vscode.Position(tcase.range.start.line, 100)
+                  )
+                );
+
+              locationDerivations.push(
+                tryDeriveLocation(rawErr).then(location => {
+                  const message = new vscode.TestMessage(tryMakeMarkdown(err));
+                  message.location = location ?? testFirstLine;
+                  message.actualOutput = String(actual);
+                  message.expectedOutput = String(expected);
+                  task.appendMessage(tcase, message);
+                  task.setState(tcase, vscode.TestResultState.Failed, duration);
+                })
+              );
+            }
+            break;
+          case MochaEvent.End:
+            resolve();
+            break;
+        }
+      });
+    });
+    await Promise.all(locationDerivations);
+  } catch (e) {
+    task.appendOutput(e.stack || e.message);
+  } finally {
     scanner.dispose();
-    return Promise.resolve(TestResultState.Skipped);
+    task.end();
   }
-
-  return new Promise<TestResultState>(resolve => {
-    cancellation.onCancellationRequested(() => {
-      resolve(TestResultState.Skipped);
-    });
-
-    scanner.onRunnerError(err => {
-      req.appendOutput(err + '\r\n');
-      resolve(TestResultState.Errored);
-    });
-
-    scanner.onOtherOutput(str => {
-      req.appendOutput(str + '\r\n');
-    });
-
-    scanner.onMochaEvent(evt => {
-      switch (evt[0]) {
-        case MochaEvent.Start:
-          break; // no-op
-        case MochaEvent.Pass:
-          {
-            const title = evt[1].fullTitle;
-            const tcase = tests.get(title);
-            req.appendOutput(` √ ${title}\r\n`);
-            if (tcase) {
-              req.setState(tcase, TestResultState.Passed, evt[1].duration);
-              tests.delete(title);
-            }
-          }
-          break;
-        case MochaEvent.Fail:
-          {
-            const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
-            const tcase = tests.get(id);
-            req.appendOutput(` x ${id}\r\n`);
-            if (!tcase) {
-              return;
-            }
-
-            tests.delete(id);
-            const testFirstLine = new Location(
-              tcase.uri,
-              new Range(tcase.range.start, new Position(tcase.range.start.line, 100))
-            );
-
-            tryDeriveLocation(stack || err).then(location => {
-              const message = new TestMessage(tryMakeMarkdown(err));
-              message.location = location ?? testFirstLine;
-              message.actualOutput = String(actual);
-              message.expectedOutput = String(expected);
-              req.appendMessage(tcase, message);
-              req.setState(tcase, TestResultState.Failed, duration);
-              req.appendOutput(`${stack || err}\r\n`);
-            });
-          }
-          break;
-        case MochaEvent.End:
-          resolve(TestResultState.Skipped);
-          break;
-      }
-    });
-  }).finally(() => scanner.dispose());
 }
+
+const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
 
 const tryMakeMarkdown = (message: string) => {
   const lines = message.split('\n');
@@ -164,7 +171,7 @@ const tryMakeMarkdown = (message: string) => {
 
   lines.splice(start, 1, '```diff');
   lines.push('```');
-  return new MarkdownString(lines.join('\n'));
+  return new vscode.MarkdownString(lines.join('\n'));
 };
 
 async function tryDeriveLocation(stack: string) {
@@ -177,7 +184,7 @@ async function tryDeriveLocation(stack: string) {
   let sourceMap: SourceMapConsumer;
   try {
     const sourceMapUri = fileUri + '.map';
-    const contents = await getContentsFromFile(Uri.parse(sourceMapUri));
+    const contents = await getContentFromFilesystem(vscode.Uri.parse(sourceMapUri));
     sourceMap = await new SourceMapConsumer(contents, sourceMapUri);
   } catch (e) {
     console.warn(`Error parsing sourcemap for ${fileUri}: ${e.stack}`);
@@ -193,21 +200,26 @@ async function tryDeriveLocation(stack: string) {
     return;
   }
 
-  return new Location(Uri.parse(position.source), new Position(position.line - 1, position.column));
+  return new vscode.Location(
+    vscode.Uri.parse(position.source),
+    new vscode.Position(position.line - 1, position.column)
+  );
 }
 
-async function getPendingTestMap(tests: ReadonlyArray<VSCodeTest>) {
-  const queue: Iterable<VSCodeTest>[] = [tests];
-  const titleMap = new Map<string, TestCase>();
+async function getPendingTestMap(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
+  const queue: Iterable<vscode.TestItem<VSCodeTest>>[] = [tests];
+  const titleMap = new Map<string, vscode.TestItem<TestCase>>();
   while (queue.length) {
     for (const child of queue.pop()!) {
-      if (child instanceof TestFile) {
-        await child.refresh();
-        queue.push(child.children);
-      } else if (child instanceof TestCase) {
-        titleMap.set(child.fullLabel, child);
+      if (child.data instanceof TestFile) {
+        if (child.status === vscode.TestItemStatus.Pending) {
+          await child.data.refresh();
+        }
+        queue.push(child.children.values());
+      } else if (child.data instanceof TestCase) {
+        titleMap.set(child.data.fullLabel, child as vscode.TestItem<TestCase>);
       } else {
-        queue.push(child.children);
+        queue.push(child.children.values());
       }
     }
   }
