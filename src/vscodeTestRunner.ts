@@ -4,6 +4,7 @@
 
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
+import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
@@ -40,36 +41,45 @@ export abstract class VSCodeTestRunner {
   }
 
   public async debug(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
-    const args = [...this.prepareArguments(tests), '--remote-debugging-port=9222', '--timeout=0'];
-    const cp = spawn(
-      await this.binaryPath(),
-      args,
-      {
-        cwd: this.repoLocation.uri.fsPath,
-        stdio: 'pipe',
-        env: this.getEnvironment(),
-      }
-    );
+    const server = this.createWaitServer();
+    const args = [
+      ...this.prepareArguments(tests),
+      '--remote-debugging-port=9222',
+      '--timeout=0',
+      `--waitServer=${server.port}`,
+    ];
+
+    const cp = spawn(await this.binaryPath(), args, {
+      cwd: this.repoLocation.uri.fsPath,
+      stdio: 'pipe',
+      env: this.getEnvironment(),
+    });
 
     vscode.debug.startDebugging(this.repoLocation, ATTACH_CONFIG_NAME);
 
     let exited = false;
-    let session: vscode.DebugSession | undefined;
+    let rootSession: vscode.DebugSession | undefined;
     cp.once('exit', () => {
       exited = true;
-      if (session) {
-        vscode.debug.stopDebugging(session);
+      server.dispose();
+      listener.dispose();
+      if (rootSession) {
+        vscode.debug.stopDebugging(rootSession);
       }
     });
 
     const listener = vscode.debug.onDidStartDebugSession(s => {
-      if (s.name === ATTACH_CONFIG_NAME) {
-        listener.dispose();
+      if (s.name === ATTACH_CONFIG_NAME && !rootSession) {
         if (exited) {
-          vscode.debug.stopDebugging(session);
+          vscode.debug.stopDebugging(rootSession);
         } else {
-          session = s;
+          rootSession = s;
         }
+      }
+
+      if (rootSession && s.configuration.__parentId === rootSession?.id) {
+        server.onFound();
+        listener.dispose();
       }
     });
 
@@ -128,6 +138,32 @@ export abstract class VSCodeTestRunner {
     } catch (e) {
       throw new Error(`Error parsing product.json: ${e.message}`);
     }
+  }
+
+  private createWaitServer() {
+    const onFound = new vscode.EventEmitter<void>();
+    let found = false;
+
+    const server = createServer(socket => {
+      if (found) {
+        socket.end();
+      } else {
+        onFound.event(() => socket.end());
+      }
+    });
+
+    server.listen(0);
+
+    return {
+      port: (server.address() as AddressInfo).port,
+      onFound: () => {
+        found = true;
+        onFound.fire();
+      },
+      dispose: () => {
+        server.close();
+      },
+    };
   }
 }
 
