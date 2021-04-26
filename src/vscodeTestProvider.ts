@@ -51,7 +51,7 @@ export class VSCodeTestController implements vscode.TestController<VSCodeTest> {
     const root = maybeRoot as vscode.TestItem<TestRoot>;
     const runner = new PlatformTestRunner(root.data.workspaceFolder);
     const map = await getPendingTestMap(req.tests);
-    const task = vscode.test.createTestRunTask(req);
+    const task = vscode.test.createTestRun(req);
     for (const test of map.values()) {
       task.setState(test, vscode.TestResultState.Queued);
     }
@@ -69,7 +69,7 @@ export class VSCodeTestController implements vscode.TestController<VSCodeTest> {
 
 async function scanTestOutput(
   tests: Map<string, vscode.TestItem<VSCodeTest>>,
-  task: vscode.TestRunTask<VSCodeTest>,
+  task: vscode.TestRun<VSCodeTest>,
   scanner: TestOutputScanner,
   cancellation: vscode.CancellationToken
 ): Promise<void> {

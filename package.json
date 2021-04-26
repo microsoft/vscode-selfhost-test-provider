@@ -1,70 +1,70 @@
 {
-	"name": "vscode-selfhost-test-provider",
-	"displayName": "VS Code Selfhost Test Provider",
-	"description": "Test provider for the VS Code project",
-	"enableProposedApi": true,
-	"version": "0.2.0",
-	"publisher": "ms-vscode",
-	"engines": {
-		"vscode": "^1.53.0-insider"
-	},
-	"categories": [
-		"Other"
-	],
-	"activationEvents": [
-		"workspaceContains:src/vs/loader.js"
-	],
+  "name": "vscode-selfhost-test-provider",
+  "displayName": "VS Code Selfhost Test Provider",
+  "description": "Test provider for the VS Code project",
+  "enableProposedApi": true,
+  "version": "0.2.0",
+  "publisher": "ms-vscode",
+  "engines": {
+    "vscode": "^1.53.0-insider"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:src/vs/loader.js"
+  ],
   "workspaceTrust": {
     "request": "onDemand",
     "description": "Trust is required to execute tests in the workspace."
   },
-	"main": "./dist/extension.js",
-	"prettier": {
-		"printWidth": 100,
-		"singleQuote": true,
-		"tabWidth": 2,
-		"arrowParens": "avoid"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/microsoft/vscode-selfhost-test-provider.git"
-	},
-	"author": "Connor Peet <connor@peet.io>",
-	"license": "MIT",
-	"bugs": {
-		"url": "https://github.com/microsoft/vscode-selfhost-test-provider/issues"
-	},
-	"homepage": "https://github.com/microsoft/vscode-selfhost-test-provider#readme",
-	"scripts": {
-		"vscode:prepublish": "npm run package",
-		"compile": "webpack --config ./build/node-extension.webpack.config.js",
-		"watch": "webpack --watch --config ./build/node-extension.webpack.config.js",
-		"package": "webpack --mode production --devtool hidden-source-map --config ./build/node-extension.webpack.config.js",
-		"fmt": "prettier --write \"src/**/*.ts\"&& npm run test -- --fix",
-		"test": "tsc --noEmit && eslint src --ext ts",
-		"download-api": "vscode-dts dev",
-		"postdownload-api": "vscode-dts master",
-		"postinstall": "npm run download-api"
-	},
-	"devDependencies": {
-		"@types/node": "^12.11.7",
-		"@types/split2": "^2.1.6",
-		"@typescript-eslint/eslint-plugin": "^4.9.0",
-		"@typescript-eslint/parser": "^4.9.0",
-		"copy-webpack-plugin": "^7.0.0",
-		"eslint": "^7.15.0",
-		"eslint-plugin-header": "^3.1.0",
-		"prettier": "^2.2.1",
-		"source-map": "^0.7.3",
-		"ts-loader": "^8.0.11",
-		"vscode-debugprotocol": "^1.43.0",
-		"vscode-dts": "^0.3.1",
-		"webpack": "^5.10.0",
-		"webpack-cli": "^4.2.0"
-	},
-	"dependencies": {
-		"ansi-styles": "^6.0.0",
-		"split2": "^3.2.2",
-		"typescript": "^4.1.3"
-	}
+  "main": "./dist/extension.js",
+  "prettier": {
+    "printWidth": 100,
+    "singleQuote": true,
+    "tabWidth": 2,
+    "arrowParens": "avoid"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/vscode-selfhost-test-provider.git"
+  },
+  "author": "Connor Peet <connor@peet.io>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/microsoft/vscode-selfhost-test-provider/issues"
+  },
+  "homepage": "https://github.com/microsoft/vscode-selfhost-test-provider#readme",
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack --config ./build/node-extension.webpack.config.js",
+    "watch": "webpack --watch --config ./build/node-extension.webpack.config.js",
+    "package": "webpack --mode production --devtool hidden-source-map --config ./build/node-extension.webpack.config.js",
+    "fmt": "prettier --write \"src/**/*.ts\"&& npm run test -- --fix",
+    "test": "tsc --noEmit && eslint src --ext ts",
+    "download-api": "vscode-dts dev",
+    "postdownload-api": "vscode-dts master",
+    "postinstall": "npm run download-api"
+  },
+  "devDependencies": {
+    "@types/node": "^12.11.7",
+    "@types/split2": "^2.1.6",
+    "@typescript-eslint/eslint-plugin": "^4.9.0",
+    "@typescript-eslint/parser": "^4.9.0",
+    "copy-webpack-plugin": "^7.0.0",
+    "eslint": "^7.15.0",
+    "eslint-plugin-header": "^3.1.0",
+    "prettier": "^2.2.1",
+    "source-map": "^0.7.3",
+    "ts-loader": "^8.0.11",
+    "vscode-debugprotocol": "^1.43.0",
+    "vscode-dts": "^0.3.1",
+    "webpack": "^5.10.0",
+    "webpack-cli": "^4.2.0"
+  },
+  "dependencies": {
+    "ansi-styles": "^6.0.0",
+    "split2": "^3.2.2",
+    "typescript": "^4.1.3"
+  }
 }
