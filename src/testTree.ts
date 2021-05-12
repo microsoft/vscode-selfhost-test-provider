@@ -23,6 +23,7 @@ export class WorkspaceTestRoot extends TestRoot {
     );
 
     item.status = vscode.TestItemStatus.Pending;
+    item.debuggable = true;
     item.resolveHandler = token => {
       const pattern = new vscode.RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
@@ -63,6 +64,7 @@ export class DocumentTestRoot extends TestRoot {
     );
 
     item.status = vscode.TestItemStatus.Pending;
+    item.debuggable = true;
     item.resolveHandler = token => {
       const contentChange = new vscode.EventEmitter<vscode.Uri>();
       const changeListener = vscode.workspace.onDidChangeTextDocument(e => {
@@ -121,6 +123,7 @@ export class TestFile {
 
     item.data = new TestFile(workspaceFolder, contentGetter, item);
     item.status = vscode.TestItemStatus.Pending;
+    item.debuggable = true;
     item.resolveHandler = token => {
       const doRefresh = (invalidate: boolean) => {
         item.data.refresh(invalidate).then(() => {
@@ -158,9 +161,9 @@ export class TestFile {
    */
   public async refresh(invalidate = false) {
     try {
-      const decoded = await this.getContent(this.item.uri);
+      const decoded = await this.getContent(this.item.uri!);
       const ast = ts.createSourceFile(
-        this.item.uri.path.split('/').pop()!,
+        this.item.uri!.path.split('/').pop()!,
         decoded,
         ts.ScriptTarget.ESNext,
         false,
@@ -244,6 +247,7 @@ export class TestSuite {
     );
 
     item.range = range;
+    item.debuggable = true;
     return item;
   }
 
@@ -270,6 +274,7 @@ export class TestCase {
     );
 
     item.range = range;
+    item.debuggable = true;
     return item;
   }
 

@@ -74,6 +74,8 @@ async function scanTestOutput(
   cancellation: vscode.CancellationToken
 ): Promise<void> {
   const locationDerivations: Promise<void>[] = [];
+  let lastTest: vscode.TestItem<VSCodeTest> | undefined;
+
   try {
     if (cancellation.isCancellationRequested) {
       return;
@@ -103,6 +105,7 @@ async function scanTestOutput(
               const tcase = tests.get(title);
               task.appendOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
               if (tcase) {
+                lastTest = tcase;
                 task.setState(tcase, vscode.TestResultState.Passed, evt[1].duration);
                 tests.delete(title);
               }
@@ -111,7 +114,12 @@ async function scanTestOutput(
           case MochaEvent.Fail:
             {
               const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
-              const tcase = tests.get(id);
+              let tcase = tests.get(id);
+              // report failures on hook to the last-seen test, or first test if none run yet
+              if (!tcase && id.includes('hook for')) {
+                tcase = lastTest ?? tests.values().next().value;
+              }
+
               task.appendOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
               const rawErr = stack || err;
               if (rawErr) {
@@ -126,7 +134,7 @@ async function scanTestOutput(
               const testFirstLine =
                 tcase.range &&
                 new vscode.Location(
-                  tcase.uri,
+                  tcase.uri!,
                   new vscode.Range(
                     tcase.range.start,
                     new vscode.Position(tcase.range.start.line, 100)
@@ -139,8 +147,8 @@ async function scanTestOutput(
                   message.location = location ?? testFirstLine;
                   message.actualOutput = String(actual);
                   message.expectedOutput = String(expected);
-                  task.appendMessage(tcase, message);
-                  task.setState(tcase, vscode.TestResultState.Failed, duration);
+                  task.appendMessage(tcase!, message);
+                  task.setState(tcase!, vscode.TestResultState.Failed, duration);
                 })
               );
             }

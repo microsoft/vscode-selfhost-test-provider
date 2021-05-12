@@ -106,7 +106,7 @@ export abstract class VSCodeTestRunner {
         grepRe.push(escapeRe(test.data.fullLabel) + (test.data instanceof TestCase ? '$' : ' '));
       } else if (test.data instanceof TestFile || test.data instanceof DocumentTestRoot) {
         runPaths.push(
-          path.relative(test.data.workspaceFolder.uri.fsPath, test.uri.fsPath).replace(/\\/g, '/')
+          path.relative(test.data.workspaceFolder.uri.fsPath, test.uri!.fsPath).replace(/\\/g, '/')
         );
       }
     }
