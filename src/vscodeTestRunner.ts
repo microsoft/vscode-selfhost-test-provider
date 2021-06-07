@@ -25,6 +25,7 @@ const escapeRe = (s: string) => s.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
 
 const TEST_SCRIPT_PATH = 'test/unit/electron/index.js';
 const ATTACH_CONFIG_NAME = 'Attach to VS Code';
+const DEBUG_TYPE = 'pwa-chrome';
 
 export abstract class VSCodeTestRunner {
   constructor(protected readonly repoLocation: vscode.WorkspaceFolder) {}
@@ -55,6 +56,37 @@ export abstract class VSCodeTestRunner {
       env: this.getEnvironment(),
     });
 
+    // Register a descriptor factory that signals the server when any
+    // breakpoint set requests on the debugee have been completed.
+    const factory = vscode.debug.registerDebugAdapterTrackerFactory(DEBUG_TYPE, {
+      createDebugAdapterTracker(session) {
+        if (!session.parentSession || session.parentSession !== rootSession) {
+          return;
+        }
+
+        let breakpointRequestId: number | undefined;
+
+        return {
+          onDidSendMessage(message) {
+            if (message.type === 'response' && message.request_seq === breakpointRequestId) {
+              server.ready();
+            }
+          },
+          onWillReceiveMessage(message) {
+            if (breakpointRequestId !== undefined) {
+              return;
+            }
+
+            if (message.command === 'configurationDone') {
+              server.ready();
+            } else if (message.command === 'setBreakpoints') {
+              breakpointRequestId = message.seq;
+            }
+          },
+        };
+      },
+    });
+
     vscode.debug.startDebugging(this.repoLocation, ATTACH_CONFIG_NAME);
 
     let exited = false;
@@ -63,6 +95,8 @@ export abstract class VSCodeTestRunner {
       exited = true;
       server.dispose();
       listener.dispose();
+      factory.dispose();
+
       if (rootSession) {
         vscode.debug.stopDebugging(rootSession);
       }
@@ -75,11 +109,6 @@ export abstract class VSCodeTestRunner {
         } else {
           rootSession = s;
         }
-      }
-
-      if (rootSession && s.configuration.__parentId === rootSession?.id) {
-        server.onFound();
-        listener.dispose();
       }
     });
 
@@ -141,14 +170,14 @@ export abstract class VSCodeTestRunner {
   }
 
   private createWaitServer() {
-    const onFound = new vscode.EventEmitter<void>();
-    let found = false;
+    const onReady = new vscode.EventEmitter<void>();
+    let ready = false;
 
     const server = createServer(socket => {
-      if (found) {
+      if (ready) {
         socket.end();
       } else {
-        onFound.event(() => socket.end());
+        onReady.event(() => socket.end());
       }
     });
 
@@ -156,9 +185,9 @@ export abstract class VSCodeTestRunner {
 
     return {
       port: (server.address() as AddressInfo).port,
-      onFound: () => {
-        found = true;
-        onFound.fire();
+      ready: () => {
+        ready = true;
+        onReady.fire();
       },
       dispose: () => {
         server.close();
