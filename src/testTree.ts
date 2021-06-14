@@ -116,7 +116,7 @@ export class TestFile {
     workspaceFolder: vscode.WorkspaceFolder
   ) {
     const item = vscode.test.createTestItem<TestFile>({
-      id: `vscodetests/${uri}`,
+      id: `vscodetests/${uri}`.toLowerCase(),
       label: relative(join(workspaceFolder.uri.fsPath, 'src', 'vs'), uri.fsPath),
       uri,
     });
@@ -239,7 +239,7 @@ export class TestSuite {
         id: JSON.stringify({
           label: getFullLabel(parent, label),
           uri: parent.uri,
-        }),
+        }).toLowerCase(),
         label,
         uri: parent.uri,
       },
@@ -266,7 +266,7 @@ export class TestCase {
         id: JSON.stringify({
           label: getFullLabel(parent, label),
           uri: parent.uri,
-        }),
+        }).toLowerCase(),
         label,
         uri: parent.uri,
       },
