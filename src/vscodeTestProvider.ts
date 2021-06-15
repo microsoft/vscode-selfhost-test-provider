@@ -3,6 +3,7 @@
  *--------------------------------------------------------*/
 
 import styles from 'ansi-styles';
+import { decode as base64Decode } from 'js-base64';
 import { SourceMapConsumer } from 'source-map';
 import * as vscode from 'vscode';
 import { MochaEvent, TestOutputScanner } from './testOutputScanner';
@@ -182,6 +183,8 @@ const tryMakeMarkdown = (message: string) => {
   return new vscode.MarkdownString(lines.join('\n'));
 };
 
+const inlineSourcemapRe = /^\/\/# sourceMappingURL=data:application\/json;base64,(.+)/m;
+
 async function tryDeriveLocation(stack: string) {
   const parts = /(file:\/{3}.+):([0-9]+):([0-9]+)/.exec(stack);
   if (!parts) {
@@ -191,9 +194,14 @@ async function tryDeriveLocation(stack: string) {
   const [, fileUri, line, col] = parts;
   let sourceMap: SourceMapConsumer;
   try {
-    const sourceMapUri = fileUri + '.map';
-    const contents = await getContentFromFilesystem(vscode.Uri.parse(sourceMapUri));
-    sourceMap = await new SourceMapConsumer(contents, sourceMapUri);
+    const contents = await getContentFromFilesystem(vscode.Uri.parse(fileUri));
+    const sourcemapMatch = inlineSourcemapRe.exec(contents);
+    if (!sourcemapMatch) {
+      return;
+    }
+
+    const decoded = base64Decode(sourcemapMatch[1]);
+    sourceMap = await new SourceMapConsumer(decoded, fileUri);
   } catch (e) {
     console.warn(`Error parsing sourcemap for ${fileUri}: ${e.stack}`);
     return;
