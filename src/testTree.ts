@@ -9,94 +9,34 @@ import * as vscode from 'vscode';
 import { extractTestFromNode } from './sourceUtils';
 
 const textDecoder = new TextDecoder('utf-8');
-const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
-
-export class TestRoot {
-  constructor(public readonly workspaceFolder: vscode.WorkspaceFolder) {}
-}
-
-export class WorkspaceTestRoot extends TestRoot {
-  public static create(workspaceFolder: vscode.WorkspaceFolder) {
-    const item = vscode.test.createTestItem<WorkspaceTestRoot, TestFile>(
-      { id: 'vscodetests', label: 'VS Code Tests', uri: workspaceFolder.uri },
-      new WorkspaceTestRoot(workspaceFolder)
-    );
-
-    item.status = vscode.TestItemStatus.Pending;
-    item.debuggable = true;
-    item.resolveHandler = token => {
-      const pattern = new vscode.RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
-      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-      const contentChange = new vscode.EventEmitter<vscode.Uri>();
-
-      watcher.onDidCreate(uri =>
-        item.addChild(
-          TestFile.create(uri, getContentFromFilesystem, contentChange.event, workspaceFolder)
-        )
-      );
-      watcher.onDidChange(uri => contentChange.fire(uri));
-      watcher.onDidDelete(uri => item.children.get(uri.toString())?.dispose());
-      token.onCancellationRequested(() => {
-        item.status = vscode.TestItemStatus.Pending;
-        watcher.dispose();
-      });
-
-      vscode.workspace.findFiles(pattern).then(files => {
-        for (const file of files) {
-          item.addChild(
-            TestFile.create(file, getContentFromFilesystem, contentChange.event, workspaceFolder)
-          );
-        }
-
-        item.status = vscode.TestItemStatus.Resolved;
-      });
-    };
-
-    return item;
-  }
-}
-
-export class DocumentTestRoot extends TestRoot {
-  public static create(document: vscode.TextDocument, workspaceFolder: vscode.WorkspaceFolder) {
-    const item = vscode.test.createTestItem<DocumentTestRoot, TestFile>(
-      { id: 'vscodetests', label: 'VS Code Tests', uri: document.uri },
-      new DocumentTestRoot(workspaceFolder)
-    );
-
-    item.status = vscode.TestItemStatus.Pending;
-    item.debuggable = true;
-    item.resolveHandler = token => {
-      const contentChange = new vscode.EventEmitter<vscode.Uri>();
-      const changeListener = vscode.workspace.onDidChangeTextDocument(e => {
-        contentChange.fire(e.document.uri);
-      });
-
-      const file = TestFile.create(
-        document.uri,
-        () => Promise.resolve(document.getText()),
-        contentChange.event,
-        workspaceFolder
-      );
-      item.addChild(file);
-
-      token.onCancellationRequested(() => {
-        changeListener.dispose();
-        item.status = vscode.TestItemStatus.Pending;
-      });
-
-      item.status = vscode.TestItemStatus.Resolved;
-    };
-
-    return item;
-  }
-}
-
-const getFullLabel = (parent: vscode.TestItem<TestSuite | TestFile>, label: string): string =>
-  parent.data instanceof TestSuite ? `${parent.data.fullLabel} ${label}` : label;
 
 let generationCounter = 0;
 
 type ContentGetter = (uri: vscode.Uri) => Promise<string>;
+
+/**
+ * Tries to guess which workspace folder VS Code is in.
+ */
+export const guessWorkspaceFolder = async () => {
+  if (!vscode.workspace.workspaceFolders) {
+    return undefined;
+  }
+
+  if (vscode.workspace.workspaceFolders.length < 2) {
+    return vscode.workspace.workspaceFolders[0];
+  }
+
+  for (const folder of vscode.workspace.workspaceFolders) {
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.joinPath(folder.uri, 'src/vs/loader.js'));
+      return folder;
+    } catch {
+      // ignored
+    }
+  }
+
+  return undefined;
+};
 
 export const getContentFromFilesystem: ContentGetter = async uri => {
   try {
@@ -108,103 +48,94 @@ export const getContentFromFilesystem: ContentGetter = async uri => {
   }
 };
 
+export class TestRoot {}
+
 export class TestFile {
-  public static create(
-    uri: vscode.Uri,
-    contentGetter: ContentGetter,
-    onContentChange: vscode.Event<vscode.Uri>,
-    workspaceFolder: vscode.WorkspaceFolder
-  ) {
-    const item = vscode.test.createTestItem<TestFile>({
-      id: `vscodetests/${uri}`.toLowerCase(),
-      label: relative(join(workspaceFolder.uri.fsPath, 'src', 'vs'), uri.fsPath),
-      uri,
-    });
+  constructor(
+    public readonly uri: vscode.Uri,
+    public readonly workspaceFolder: vscode.WorkspaceFolder
+  ) {}
 
-    item.data = new TestFile(workspaceFolder, contentGetter, item);
-    item.status = vscode.TestItemStatus.Pending;
-    item.debuggable = true;
-    item.resolveHandler = token => {
-      const doRefresh = (invalidate: boolean) => {
-        item.data.refresh(invalidate).then(() => {
-          if (!token.isCancellationRequested) {
-            item.status = vscode.TestItemStatus.Resolved;
-          }
-        });
-      };
-
-      const listener = onContentChange(uri => {
-        if (uri.toString() === uri.toString()) {
-          doRefresh(true);
-        }
-      });
-
-      token.onCancellationRequested(() => {
-        item.status = vscode.TestItemStatus.Pending;
-        listener.dispose();
-      });
-
-      doRefresh(false);
-    };
-
-    return item;
+  public getId() {
+    return this.uri.toString().toLowerCase();
   }
 
-  constructor(
-    public readonly workspaceFolder: vscode.WorkspaceFolder,
-    private readonly getContent: ContentGetter,
-    private readonly item: vscode.TestItem<TestFile>
-  ) {}
+  public getLabel() {
+    return relative(join(this.workspaceFolder.uri.fsPath, 'src', 'vs'), this.uri.fsPath);
+  }
+
+  public async updateFromDisk(
+    controller: vscode.TestController,
+    item: vscode.TestItem,
+    invalidate?: boolean
+  ) {
+    try {
+      const content = await getContentFromFilesystem(item.uri!);
+      item.error = undefined;
+      this.updateFromContents(controller, content, item, invalidate);
+    } catch (e) {
+      item.error = e.stack;
+    }
+  }
 
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
-  public async refresh(invalidate = false) {
+  public updateFromContents(
+    controller: vscode.TestController,
+    content: string,
+    item: vscode.TestItem,
+    invalidate = false
+  ) {
     try {
-      const decoded = await this.getContent(this.item.uri!);
       const ast = ts.createSourceFile(
-        this.item.uri!.path.split('/').pop()!,
-        decoded,
+        this.uri.path.split('/').pop()!,
+        content,
         ts.ScriptTarget.ESNext,
         false,
         ts.ScriptKind.TS
       );
 
-      const parents: vscode.TestItem<TestFile | TestSuite>[] = [this.item];
+      const parents: vscode.TestItem<TestFile | TestSuite>[] = [item];
       const thisGeneration = generationCounter++;
       const traverse = (node: ts.Node) => {
         const parent = parents[parents.length - 1];
-        const newItem = extractTestFromNode(ast, node, parent, thisGeneration);
-        if (!newItem) {
+        const childData = extractTestFromNode(ast, node, parent.data, thisGeneration);
+        if (!childData) {
           ts.forEachChild(node, traverse);
           return;
         }
 
-        const existing = parent.children.get(newItem.id);
-        if (existing) {
+        const id = `${item.uri}/${childData.fullName}`.toLowerCase();
+        let child = parent.children.get(id);
+        if (child) {
           // location is the only thing that changes in existing items
-          existing.range = newItem.range;
-          existing.data.generation = thisGeneration;
+          child.range = childData.range;
+          child.data.generation = thisGeneration;
           if (invalidate) {
-            existing.invalidate();
+            child.invalidate();
           }
         } else {
-          parent.addChild(newItem);
+          child = controller.createTestItem(id, childData.name, parent, item.uri, childData);
+          child.debuggable = true;
+          child.range = childData.range;
         }
 
-        const finalItem = existing || newItem;
-        if (finalItem.data instanceof TestSuite) {
-          parents.push(finalItem);
+        if (child.data instanceof TestSuite) {
+          parents.push(child);
           ts.forEachChild(node, traverse);
           parents.pop();
         }
       };
 
       ts.forEachChild(ast, traverse);
-      this.prune(thisGeneration);
+      this.prune(item, thisGeneration);
+      item.error = undefined;
     } catch (e) {
-      this.item.error = String(e.stack || e.message);
+      item.error = String(e.stack || e.message);
     }
+
+    item.status = vscode.TestItemStatus.Resolved;
   }
 
   /**
@@ -213,8 +144,8 @@ export class TestFile {
    * is called after discovery is finished to remove any children who are no
    * longer in this generation.
    */
-  private prune(thisGeneration: number) {
-    const queue: vscode.TestItem<TestFile | TestSuite, TestSuite | TestCase>[] = [this.item];
+  private prune(item: vscode.TestItem, thisGeneration: number) {
+    const queue = [item];
     for (const parent of queue) {
       for (const child of parent.children.values()) {
         if (child.data.generation < thisGeneration) {
@@ -227,58 +158,21 @@ export class TestFile {
   }
 }
 
-export class TestSuite {
-  public static create(
-    label: string,
-    range: vscode.Range,
-    generation: number,
-    parent: vscode.TestItem<TestSuite | TestFile>
+export abstract class TestConstruct {
+  public fullName: string;
+
+  constructor(
+    public readonly name: string,
+    public readonly range: vscode.Range,
+    public generation: number,
+    parent?: TestConstruct
   ) {
-    const item = vscode.test.createTestItem(
-      {
-        id: JSON.stringify({
-          label: getFullLabel(parent, label),
-          uri: parent.uri,
-        }).toLowerCase(),
-        label,
-        uri: parent.uri,
-      },
-      new TestSuite(generation, getFullLabel(parent, label))
-    );
-
-    item.range = range;
-    item.debuggable = true;
-    return item;
+    this.fullName = parent ? `${parent.fullName} ${name}` : name;
   }
-
-  constructor(public generation: number, public fullLabel: string) {}
 }
 
-export class TestCase {
-  public static create(
-    label: string,
-    range: vscode.Range,
-    generation: number,
-    parent: vscode.TestItem<TestSuite | TestFile>
-  ) {
-    const item = vscode.test.createTestItem(
-      {
-        id: JSON.stringify({
-          label: getFullLabel(parent, label),
-          uri: parent.uri,
-        }).toLowerCase(),
-        label,
-        uri: parent.uri,
-      },
-      new TestCase(generation, getFullLabel(parent, label))
-    );
+export class TestSuite extends TestConstruct {}
 
-    item.range = range;
-    item.debuggable = true;
-    return item;
-  }
+export class TestCase extends TestConstruct {}
 
-  constructor(public generation: number, public fullLabel: string) {}
-}
-
-export type VSCodeTest = WorkspaceTestRoot | DocumentTestRoot | TestFile | TestSuite | TestCase;
+export type VSCodeTest = TestRoot | TestFile | TestSuite | TestCase;

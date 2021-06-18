@@ -8,14 +8,7 @@ import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import {
-  DocumentTestRoot,
-  TestCase,
-  TestFile,
-  TestSuite,
-  VSCodeTest,
-  WorkspaceTestRoot,
-} from './testTree';
+import { TestCase, TestFile, TestRoot, TestSuite, VSCodeTest } from './testTree';
 
 /**
  * From MDN
@@ -129,11 +122,11 @@ export abstract class VSCodeTestRunner {
     const grepRe: string[] = [];
     const runPaths: string[] = [];
     for (const test of tests) {
-      if (test.data instanceof WorkspaceTestRoot) {
+      if (test.data instanceof TestRoot) {
         return args;
       } else if (test.data instanceof TestCase || test.data instanceof TestSuite) {
-        grepRe.push(escapeRe(test.data.fullLabel) + (test.data instanceof TestCase ? '$' : ' '));
-      } else if (test.data instanceof TestFile || test.data instanceof DocumentTestRoot) {
+        grepRe.push(escapeRe(test.data.fullName) + (test.data instanceof TestCase ? '$' : ' '));
+      } else if (test.data instanceof TestFile) {
         runPaths.push(
           path.relative(test.data.workspaceFolder.uri.fsPath, test.uri!.fsPath).replace(/\\/g, '/')
         );

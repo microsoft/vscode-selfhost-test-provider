@@ -4,14 +4,14 @@
 
 import * as ts from 'typescript';
 import * as vscode from 'vscode';
-import { TestCase, TestFile, TestSuite } from './testTree';
+import { TestCase, TestConstruct, TestSuite, VSCodeTest } from './testTree';
 
 const suiteNames = new Set(['suite', 'flakySuite']);
 
 export const extractTestFromNode = (
   src: ts.SourceFile,
   node: ts.Node,
-  parent: vscode.TestItem<TestSuite | TestFile>,
+  parent: VSCodeTest,
   generation: number
 ) => {
   if (!ts.isCallExpression(node)) {
@@ -36,12 +36,13 @@ export const extractTestFromNode = (
     new vscode.Position(end.line, end.character)
   );
 
+  const cparent = parent instanceof TestConstruct ? parent : undefined;
   if (lhs.escapedText === 'test') {
-    return TestCase.create(name.text, range, generation, parent);
+    return new TestCase(name.text, range, generation, cparent);
   }
 
   if (suiteNames.has(lhs.escapedText.toString())) {
-    return TestSuite.create(name.text, range, generation, parent);
+    return new TestSuite(name.text, range, generation, cparent);
   }
 
   return undefined;
