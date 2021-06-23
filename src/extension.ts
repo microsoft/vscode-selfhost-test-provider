@@ -16,15 +16,17 @@ export function activate(context: vscode.ExtensionContext) {
   const ctrl = vscode.test.createTestController<VSCodeTest>('selfhost-test-controller');
 
   ctrl.root.label = 'VS Code Unit Tests';
-  ctrl.root.status = vscode.TestItemStatus.Pending;
+  ctrl.root.canResolveChildren = true;
   ctrl.root.debuggable = true;
   ctrl.root.data = new TestRoot();
 
-  ctrl.resolveChildrenHandler = (test, token) => {
+  ctrl.resolveChildrenHandler = async test => {
     if (test === ctrl.root) {
-      startWatchingWorkspace(ctrl, token);
+      context.subscriptions.push(await startWatchingWorkspace(ctrl));
     } else if (test.data instanceof TestFile) {
-      test.data.updateFromDisk(ctrl, test);
+      // No need to watch this, updates will be triggered on file changes
+      // either by the text document or file watcher.
+      await test.data.updateFromDisk(ctrl, test);
     }
   };
 
@@ -85,19 +87,15 @@ function getOrCreateFile(
   }
 
   const file = controller.createTestItem(data.getId(), data.getLabel(), controller.root, uri, data);
-  file.status = vscode.TestItemStatus.Pending;
+  file.canResolveChildren = true;
   file.debuggable = true;
   return file;
 }
 
-async function startWatchingWorkspace(
-  controller: vscode.TestController,
-  token: vscode.CancellationToken
-) {
+async function startWatchingWorkspace(controller: vscode.TestController) {
   const workspaceFolder = await guessWorkspaceFolder();
   if (!workspaceFolder) {
-    controller.root.status = vscode.TestItemStatus.Resolved;
-    return;
+    return new vscode.Disposable(() => undefined);
   }
 
   const pattern = new vscode.RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
@@ -107,18 +105,12 @@ async function startWatchingWorkspace(
   watcher.onDidCreate(uri => getOrCreateFile(controller, uri));
   watcher.onDidChange(uri => contentChange.fire(uri));
   watcher.onDidDelete(uri => controller.root.children.get(uri.toString())?.dispose());
-  token.onCancellationRequested(() => {
-    controller.root.status = vscode.TestItemStatus.Pending;
-    watcher.dispose();
-  });
 
-  vscode.workspace.findFiles(pattern).then(files => {
-    for (const file of files) {
-      getOrCreateFile(controller, file);
-    }
+  for (const file of await vscode.workspace.findFiles(pattern)) {
+    getOrCreateFile(controller, file);
+  }
 
-    controller.root.status = vscode.TestItemStatus.Resolved;
-  });
+  return watcher;
 }
 
 async function getPendingTestMap(
@@ -130,7 +122,7 @@ async function getPendingTestMap(
   while (queue.length) {
     for (const child of queue.pop()!) {
       if (child.data instanceof TestFile) {
-        if (child.status === vscode.TestItemStatus.Pending) {
+        if (!child.data.hasBeenRead) {
           await child.data.updateFromDisk(ctrl, child);
         }
         queue.push(child.children.values());

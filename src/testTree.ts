@@ -51,6 +51,8 @@ export const getContentFromFilesystem: ContentGetter = async uri => {
 export class TestRoot {}
 
 export class TestFile {
+  public hasBeenRead = false;
+
   constructor(
     public readonly uri: vscode.Uri,
     public readonly workspaceFolder: vscode.WorkspaceFolder
@@ -131,11 +133,10 @@ export class TestFile {
       ts.forEachChild(ast, traverse);
       this.prune(item, thisGeneration);
       item.error = undefined;
+      this.hasBeenRead = true;
     } catch (e) {
       item.error = String(e.stack || e.message);
     }
-
-    item.status = vscode.TestItemStatus.Resolved;
   }
 
   /**
