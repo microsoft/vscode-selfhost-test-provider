@@ -14,6 +14,8 @@ let generationCounter = 0;
 
 type ContentGetter = (uri: vscode.Uri) => Promise<string>;
 
+export const itemData = new WeakMap<vscode.TestItem, VSCodeTest>();
+
 /**
  * Tries to guess which workspace folder VS Code is in.
  */
@@ -66,15 +68,11 @@ export class TestFile {
     return relative(join(this.workspaceFolder.uri.fsPath, 'src', 'vs'), this.uri.fsPath);
   }
 
-  public async updateFromDisk(
-    controller: vscode.TestController,
-    item: vscode.TestItem,
-    invalidate?: boolean
-  ) {
+  public async updateFromDisk(controller: vscode.TestController, item: vscode.TestItem) {
     try {
       const content = await getContentFromFilesystem(item.uri!);
       item.error = undefined;
-      this.updateFromContents(controller, content, item, invalidate);
+      this.updateFromContents(controller, content, item);
     } catch (e) {
       item.error = e.stack;
     }
@@ -86,8 +84,7 @@ export class TestFile {
   public updateFromContents(
     controller: vscode.TestController,
     content: string,
-    item: vscode.TestItem,
-    invalidate = false
+    item: vscode.TestItem
   ) {
     try {
       const ast = ts.createSourceFile(
@@ -98,11 +95,11 @@ export class TestFile {
         ts.ScriptKind.TS
       );
 
-      const parents: vscode.TestItem<TestFile | TestSuite>[] = [item];
+      const parents: vscode.TestItem[] = [item];
       const thisGeneration = generationCounter++;
       const traverse = (node: ts.Node) => {
         const parent = parents[parents.length - 1];
-        const childData = extractTestFromNode(ast, node, parent.data, thisGeneration);
+        const childData = extractTestFromNode(ast, node, itemData.get(parent)!, thisGeneration);
         if (!childData) {
           ts.forEachChild(node, traverse);
           return;
@@ -113,17 +110,14 @@ export class TestFile {
         if (child) {
           // location is the only thing that changes in existing items
           child.range = childData.range;
-          child.data.generation = thisGeneration;
-          if (invalidate) {
-            child.invalidate();
-          }
+          (itemData.get(child) as TestCase | TestSuite).generation = thisGeneration;
         } else {
-          child = controller.createTestItem(id, childData.name, parent, item.uri, childData);
-          child.debuggable = true;
+          child = controller.createTestItem(id, childData.name, parent, item.uri);
+          itemData.set(child, childData);
           child.range = childData.range;
         }
 
-        if (child.data instanceof TestSuite) {
+        if (childData instanceof TestSuite) {
           parents.push(child);
           ts.forEachChild(node, traverse);
           parents.pop();
@@ -149,9 +143,10 @@ export class TestFile {
     const queue = [item];
     for (const parent of queue) {
       for (const child of parent.children.values()) {
-        if (child.data.generation < thisGeneration) {
+        const data = itemData.get(child) as TestCase | TestSuite;
+        if (data.generation < thisGeneration) {
           child.dispose();
-        } else if (child.data instanceof TestSuite) {
+        } else if (data instanceof TestSuite) {
           queue.push(child);
         }
       }

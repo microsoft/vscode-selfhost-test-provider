@@ -8,7 +8,7 @@ import { decode as base64Decode } from 'js-base64';
 import { SourceMapConsumer } from 'source-map';
 import * as split from 'split2';
 import * as vscode from 'vscode';
-import { getContentFromFilesystem, VSCodeTest } from './testTree';
+import { getContentFromFilesystem } from './testTree';
 
 export const enum MochaEvent {
   Start = 'start',
@@ -111,13 +111,13 @@ export class TestOutputScanner implements vscode.Disposable {
 }
 
 export async function scanTestOutput(
-  tests: Map<string, vscode.TestItem<VSCodeTest>>,
-  task: vscode.TestRun<VSCodeTest>,
+  tests: Map<string, vscode.TestItem>,
+  task: vscode.TestRun,
   scanner: TestOutputScanner,
   cancellation: vscode.CancellationToken
 ): Promise<void> {
   const locationDerivations: Promise<void>[] = [];
-  let lastTest: vscode.TestItem<VSCodeTest> | undefined;
+  let lastTest: vscode.TestItem | undefined;
 
   try {
     if (cancellation.isCancellationRequested) {

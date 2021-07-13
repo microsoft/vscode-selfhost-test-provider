@@ -8,7 +8,7 @@ import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { TestCase, TestFile, TestRoot, TestSuite, VSCodeTest } from './testTree';
+import { itemData, TestCase, TestFile, TestRoot, TestSuite } from './testTree';
 
 /**
  * From MDN
@@ -16,16 +16,18 @@ import { TestCase, TestFile, TestRoot, TestSuite, VSCodeTest } from './testTree'
  */
 const escapeRe = (s: string) => s.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
 
-const TEST_SCRIPT_PATH = 'test/unit/electron/index.js';
+const TEST_ELECTRON_SCRIPT_PATH = 'test/unit/electron/index.js';
+const TEST_BROWSER_SCRIPT_PATH = 'test/unit/browser/index.js';
+
 const ATTACH_CONFIG_NAME = 'Attach to VS Code';
 const DEBUG_TYPE = 'pwa-chrome';
 
 export abstract class VSCodeTestRunner {
   constructor(protected readonly repoLocation: vscode.WorkspaceFolder) {}
 
-  public async run(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
-    const args = this.prepareArguments(tests);
-    const cp = spawn(await this.binaryPath(), this.prepareArguments(tests), {
+  public async run(baseArgs: ReadonlyArray<string>, tests: ReadonlyArray<vscode.TestItem>) {
+    const args = this.prepareArguments(baseArgs, tests);
+    const cp = spawn(await this.binaryPath(), args, {
       cwd: this.repoLocation.uri.fsPath,
       stdio: 'pipe',
       env: this.getEnvironment(),
@@ -34,10 +36,10 @@ export abstract class VSCodeTestRunner {
     return new TestOutputScanner(cp, args);
   }
 
-  public async debug(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
+  public async debug(baseArgs: ReadonlyArray<string>, tests: ReadonlyArray<vscode.TestItem>) {
     const server = this.createWaitServer();
     const args = [
-      ...this.prepareArguments(tests),
+      ...this.prepareArguments(baseArgs, tests),
       '--remote-debugging-port=9222',
       '--timeout=0',
       `--waitServer=${server.port}`,
@@ -108,7 +110,7 @@ export abstract class VSCodeTestRunner {
     return new TestOutputScanner(cp, args);
   }
 
-  private getEnvironment(): NodeJS.ProcessEnv {
+  protected getEnvironment(): NodeJS.ProcessEnv {
     return {
       ...process.env,
       ELECTRON_RUN_AS_NODE: undefined,
@@ -116,19 +118,20 @@ export abstract class VSCodeTestRunner {
     };
   }
 
-  private prepareArguments(tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>) {
-    const args = [TEST_SCRIPT_PATH, ...this.getDefaultArgs(), '--reporter', 'full-json-stream'];
+  private prepareArguments(baseArgs: ReadonlyArray<string>, tests: ReadonlyArray<vscode.TestItem>) {
+    const args = [...this.getDefaultArgs(), ...baseArgs, '--reporter', 'full-json-stream'];
 
     const grepRe: string[] = [];
     const runPaths: string[] = [];
     for (const test of tests) {
-      if (test.data instanceof TestRoot) {
+      const data = itemData.get(test);
+      if (data instanceof TestRoot) {
         return args;
-      } else if (test.data instanceof TestCase || test.data instanceof TestSuite) {
-        grepRe.push(escapeRe(test.data.fullName) + (test.data instanceof TestCase ? '$' : ' '));
-      } else if (test.data instanceof TestFile) {
+      } else if (data instanceof TestCase || data instanceof TestSuite) {
+        grepRe.push(escapeRe(data.fullName) + (data instanceof TestCase ? '$' : ' '));
+      } else if (data instanceof TestFile) {
         runPaths.push(
-          path.relative(test.data.workspaceFolder.uri.fsPath, test.uri!.fsPath).replace(/\\/g, '/')
+          path.relative(data.workspaceFolder.uri.fsPath, test.uri!.fsPath).replace(/\\/g, '/')
         );
       }
     }
@@ -144,9 +147,7 @@ export abstract class VSCodeTestRunner {
     return args;
   }
 
-  protected getDefaultArgs(): string[] {
-    return [];
-  }
+  protected abstract getDefaultArgs(): string[];
 
   protected abstract binaryPath(): Promise<string>;
 
@@ -189,11 +190,36 @@ export abstract class VSCodeTestRunner {
   }
 }
 
+export class BrowserTestRunner extends VSCodeTestRunner {
+  /** @override */
+  protected binaryPath(): Promise<string> {
+    return Promise.resolve(process.execPath);
+  }
+
+  /** @override */
+  protected getEnvironment() {
+    return {
+      ...super.getEnvironment(),
+      ELECTRON_RUN_AS_NODE: '1',
+    };
+  }
+
+  /** @override */
+  protected getDefaultArgs() {
+    return [TEST_BROWSER_SCRIPT_PATH];
+  }
+}
+
 export class WindowsTestRunner extends VSCodeTestRunner {
   /** @override */
   protected async binaryPath() {
     const { nameShort } = await this.readProductJson();
     return path.join(this.repoLocation.uri.fsPath, `.build/electron/${nameShort}.exe`);
+  }
+
+  /** @override */
+  protected getDefaultArgs() {
+    return [TEST_ELECTRON_SCRIPT_PATH];
   }
 }
 
@@ -203,13 +229,18 @@ export class PosixTestRunner extends VSCodeTestRunner {
     const { applicationName } = await this.readProductJson();
     return path.join(this.repoLocation.uri.fsPath, `.build/electron/${applicationName}`);
   }
+
+  /** @override */
+  protected getDefaultArgs() {
+    return [TEST_ELECTRON_SCRIPT_PATH];
+  }
 }
 
 export class DarwinTestRunner extends PosixTestRunner {
   /** @override */
   protected getDefaultArgs() {
     return [
-      ...super.getDefaultArgs(),
+      TEST_ELECTRON_SCRIPT_PATH,
       '--no-sandbox',
       '--disable-dev-shm-usage',
       '--use-gl=swiftshader',

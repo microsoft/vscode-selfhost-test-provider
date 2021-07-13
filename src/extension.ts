@@ -4,40 +4,50 @@
 
 import * as vscode from 'vscode';
 import { scanTestOutput } from './testOutputScanner';
-import { guessWorkspaceFolder, TestCase, TestFile, TestRoot, VSCodeTest } from './testTree';
-import { PlatformTestRunner } from './vscodeTestRunner';
+import { guessWorkspaceFolder, itemData, TestCase, TestFile, TestRoot } from './testTree';
+import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
 const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
 
 const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
   uri.path.endsWith('.test.ts') ? vscode.workspace.getWorkspaceFolder(uri) : undefined;
 
+const browserArgs: [name: string, arg: string][] = [
+  ['Chrome', 'chromium'],
+  ['Firefox', 'firefox'],
+  ['Webkit', 'webkit'],
+];
+
 export function activate(context: vscode.ExtensionContext) {
-  const ctrl = vscode.test.createTestController<VSCodeTest>('selfhost-test-controller');
+  const ctrl = vscode.test.createTestController('selfhost-test-controller', 'VS Code Tests');
 
   ctrl.root.label = 'VS Code Unit Tests';
   ctrl.root.canResolveChildren = true;
-  ctrl.root.debuggable = true;
-  ctrl.root.data = new TestRoot();
+  itemData.set(ctrl.root, new TestRoot());
 
   ctrl.resolveChildrenHandler = async test => {
+    const data = itemData.get(test);
     if (test === ctrl.root) {
       context.subscriptions.push(await startWatchingWorkspace(ctrl));
-    } else if (test.data instanceof TestFile) {
+    } else if (data instanceof TestFile) {
       // No need to watch this, updates will be triggered on file changes
       // either by the text document or file watcher.
-      await test.data.updateFromDisk(ctrl, test);
+      await data.updateFromDisk(ctrl, test);
     }
   };
 
   let runQueue = Promise.resolve();
-  ctrl.runHandler = async (req, cancellationToken) => {
+  const createRunHandler = (
+    runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
+    debug: boolean,
+    args: string[] = []
+  ): vscode.TestRunHandler => async (req, cancellationToken) => {
     const folder = await guessWorkspaceFolder();
     if (!folder) {
       return;
     }
 
-    const runner = new PlatformTestRunner(folder);
+    const runner = new runnerCtor(folder);
     const map = await getPendingTestMap(ctrl, req.tests);
     const task = ctrl.createTestRun(req);
     for (const test of map.values()) {
@@ -48,16 +58,47 @@ export function activate(context: vscode.ExtensionContext) {
       await scanTestOutput(
         map,
         task,
-        req.debug ? await runner.debug(req.tests) : await runner.run(req.tests),
+        debug ? await runner.debug(args, req.tests) : await runner.run(args, req.tests),
         cancellationToken
       );
     }));
   };
 
+  ctrl.createRunConfiguration(
+    'Run in Electron',
+    vscode.TestRunConfigurationGroup.Run,
+    createRunHandler(PlatformTestRunner, false),
+    true
+  );
+
+  ctrl.createRunConfiguration(
+    'Debug in Electron',
+    vscode.TestRunConfigurationGroup.Debug,
+    createRunHandler(PlatformTestRunner, true),
+    true
+  );
+
+  for (const [name, arg] of browserArgs) {
+    const cfg = ctrl.createRunConfiguration(
+      `Run in ${name}`,
+      vscode.TestRunConfigurationGroup.Run,
+      createRunHandler(BrowserTestRunner, false, [' --browser', arg])
+    );
+
+    cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`)
+
+    ctrl.createRunConfiguration(
+      `Debug in ${name}`,
+      vscode.TestRunConfigurationGroup.Debug,
+      createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser'])
+    );
+  }
+
   function updateNodeForDocument(e: vscode.TextDocument) {
     const node = getOrCreateFile(ctrl, e.uri);
-    if (node) {
-      node.data.updateFromContents(ctrl, e.getText(), node);
+    const data = node && itemData.get(node);
+    if (data instanceof TestFile) {
+      data.updateFromContents(ctrl, e.getText(), node!);
     }
   }
 
@@ -74,7 +115,7 @@ export function activate(context: vscode.ExtensionContext) {
 function getOrCreateFile(
   controller: vscode.TestController,
   uri: vscode.Uri
-): vscode.TestItem<TestFile> | undefined {
+): vscode.TestItem | undefined {
   const folder = getWorkspaceFolderForTestFile(uri);
   if (!folder) {
     return undefined;
@@ -86,9 +127,10 @@ function getOrCreateFile(
     return existing;
   }
 
-  const file = controller.createTestItem(data.getId(), data.getLabel(), controller.root, uri, data);
+  const file = controller.createTestItem(data.getId(), data.getLabel(), controller.root, uri);
   file.canResolveChildren = true;
-  file.debuggable = true;
+  itemData.set(file, data);
+
   return file;
 }
 
@@ -115,19 +157,20 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
 
 async function getPendingTestMap(
   ctrl: vscode.TestController,
-  tests: ReadonlyArray<vscode.TestItem<VSCodeTest>>
+  tests: ReadonlyArray<vscode.TestItem>
 ) {
-  const queue: Iterable<vscode.TestItem<VSCodeTest>>[] = [tests];
-  const titleMap = new Map<string, vscode.TestItem<TestCase>>();
+  const queue: Iterable<vscode.TestItem>[] = [tests];
+  const titleMap = new Map<string, vscode.TestItem>();
   while (queue.length) {
     for (const child of queue.pop()!) {
-      if (child.data instanceof TestFile) {
-        if (!child.data.hasBeenRead) {
-          await child.data.updateFromDisk(ctrl, child);
+      const data = itemData.get(child);
+      if (data instanceof TestFile) {
+        if (!data.hasBeenRead) {
+          await data.updateFromDisk(ctrl, child);
         }
         queue.push(child.children.values());
-      } else if (child.data instanceof TestCase) {
-        titleMap.set(child.data.fullName, child as vscode.TestItem<TestCase>);
+      } else if (data instanceof TestCase) {
+        titleMap.set(data.fullName, child);
       } else {
         queue.push(child.children.values());
       }
