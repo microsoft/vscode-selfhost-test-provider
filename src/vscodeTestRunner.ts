@@ -8,7 +8,7 @@ import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { itemData, TestCase, TestFile, TestRoot, TestSuite } from './testTree';
+import { itemData, TestCase, TestFile, TestSuite } from './testTree';
 
 /**
  * From MDN
@@ -25,8 +25,8 @@ const DEBUG_TYPE = 'pwa-chrome';
 export abstract class VSCodeTestRunner {
   constructor(protected readonly repoLocation: vscode.WorkspaceFolder) {}
 
-  public async run(baseArgs: ReadonlyArray<string>, tests: ReadonlyArray<vscode.TestItem>) {
-    const args = this.prepareArguments(baseArgs, tests);
+  public async run(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
+    const args = this.prepareArguments(baseArgs, filter);
     const cp = spawn(await this.binaryPath(), args, {
       cwd: this.repoLocation.uri.fsPath,
       stdio: 'pipe',
@@ -36,10 +36,10 @@ export abstract class VSCodeTestRunner {
     return new TestOutputScanner(cp, args);
   }
 
-  public async debug(baseArgs: ReadonlyArray<string>, tests: ReadonlyArray<vscode.TestItem>) {
+  public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
     const server = this.createWaitServer();
     const args = [
-      ...this.prepareArguments(baseArgs, tests),
+      ...this.prepareArguments(baseArgs, filter),
       '--remote-debugging-port=9222',
       '--timeout=0',
       `--waitServer=${server.port}`,
@@ -118,16 +118,20 @@ export abstract class VSCodeTestRunner {
     };
   }
 
-  private prepareArguments(baseArgs: ReadonlyArray<string>, tests: ReadonlyArray<vscode.TestItem>) {
+  private prepareArguments(
+    baseArgs: ReadonlyArray<string>,
+    filter?: ReadonlyArray<vscode.TestItem>
+  ) {
     const args = [...this.getDefaultArgs(), ...baseArgs, '--reporter', 'full-json-stream'];
+    if (!filter) {
+      return args;
+    }
 
     const grepRe: string[] = [];
     const runPaths: string[] = [];
-    for (const test of tests) {
+    for (const test of filter) {
       const data = itemData.get(test);
-      if (data instanceof TestRoot) {
-        return args;
-      } else if (data instanceof TestCase || data instanceof TestSuite) {
+      if (data instanceof TestCase || data instanceof TestSuite) {
         grepRe.push(escapeRe(data.fullName) + (data instanceof TestCase ? '$' : ' '));
       } else if (data instanceof TestFile) {
         runPaths.push(

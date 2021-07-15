@@ -8,12 +8,7 @@ import { TestCase, TestConstruct, TestSuite, VSCodeTest } from './testTree';
 
 const suiteNames = new Set(['suite', 'flakySuite']);
 
-export const extractTestFromNode = (
-  src: ts.SourceFile,
-  node: ts.Node,
-  parent: VSCodeTest,
-  generation: number
-) => {
+export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: VSCodeTest) => {
   if (!ts.isCallExpression(node)) {
     return undefined;
   }
@@ -38,11 +33,11 @@ export const extractTestFromNode = (
 
   const cparent = parent instanceof TestConstruct ? parent : undefined;
   if (lhs.escapedText === 'test') {
-    return new TestCase(name.text, range, generation, cparent);
+    return new TestCase(name.text, range, cparent);
   }
 
   if (suiteNames.has(lhs.escapedText.toString())) {
-    return new TestSuite(name.text, range, generation, cparent);
+    return new TestSuite(name.text, range, cparent);
   }
 
   return undefined;

@@ -4,7 +4,7 @@
 
 import * as vscode from 'vscode';
 import { scanTestOutput } from './testOutputScanner';
-import { guessWorkspaceFolder, itemData, TestCase, TestFile, TestRoot } from './testTree';
+import { guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
 const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
@@ -18,21 +18,15 @@ const browserArgs: [name: string, arg: string][] = [
   ['Webkit', 'webkit'],
 ];
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const ctrl = vscode.test.createTestController('selfhost-test-controller', 'VS Code Tests');
-
-  ctrl.root.label = 'VS Code Unit Tests';
-  ctrl.root.canResolveChildren = true;
-  itemData.set(ctrl.root, new TestRoot());
 
   ctrl.resolveChildrenHandler = async test => {
     const data = itemData.get(test);
-    if (test === ctrl.root) {
-      context.subscriptions.push(await startWatchingWorkspace(ctrl));
-    } else if (data instanceof TestFile) {
+    if (data instanceof TestFile) {
       // No need to watch this, updates will be triggered on file changes
       // either by the text document or file watcher.
-      await data.updateFromDisk(ctrl, test);
+      await data.updateFromDisk(test);
     }
   };
 
@@ -48,7 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     const runner = new runnerCtor(folder);
-    const map = await getPendingTestMap(ctrl, req.tests);
+    const map = await getPendingTestMap(req.include ?? ctrl.items.all);
     const task = ctrl.createTestRun(req);
     for (const test of map.values()) {
       task.setState(test, vscode.TestResultState.Queued);
@@ -58,7 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
       await scanTestOutput(
         map,
         task,
-        debug ? await runner.debug(args, req.tests) : await runner.run(args, req.tests),
+        debug ? await runner.debug(args, req.include) : await runner.run(args, req.include),
         cancellationToken
       );
     }));
@@ -85,7 +79,7 @@ export function activate(context: vscode.ExtensionContext) {
       createRunHandler(BrowserTestRunner, false, [' --browser', arg])
     );
 
-    cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`)
+    cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`);
 
     ctrl.createRunConfiguration(
       `Debug in ${name}`,
@@ -98,7 +92,7 @@ export function activate(context: vscode.ExtensionContext) {
     const node = getOrCreateFile(ctrl, e.uri);
     const data = node && itemData.get(node);
     if (data instanceof TestFile) {
-      data.updateFromContents(ctrl, e.getText(), node!);
+      data.updateFromContents(e.getText(), node!);
     }
   }
 
@@ -108,7 +102,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(updateNodeForDocument),
-    vscode.workspace.onDidChangeTextDocument(e => updateNodeForDocument(e.document))
+    vscode.workspace.onDidChangeTextDocument(e => updateNodeForDocument(e.document)),
+    await startWatchingWorkspace(ctrl)
   );
 }
 
@@ -122,12 +117,13 @@ function getOrCreateFile(
   }
 
   const data = new TestFile(uri, folder);
-  const existing = controller.root.children.get(data.getId());
+  const existing = controller.items.get(data.getId());
   if (existing) {
     return existing;
   }
 
-  const file = controller.createTestItem(data.getId(), data.getLabel(), controller.root, uri);
+  const file = vscode.test.createTestItem(data.getId(), data.getLabel(), uri);
+  controller.items.add(file);
   file.canResolveChildren = true;
   itemData.set(file, data);
 
@@ -146,7 +142,7 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
 
   watcher.onDidCreate(uri => getOrCreateFile(controller, uri));
   watcher.onDidChange(uri => contentChange.fire(uri));
-  watcher.onDidDelete(uri => controller.root.children.get(uri.toString())?.dispose());
+  watcher.onDidDelete(uri => controller.items.remove(uri.toString()));
 
   for (const file of await vscode.workspace.findFiles(pattern)) {
     getOrCreateFile(controller, file);
@@ -155,24 +151,21 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
   return watcher;
 }
 
-async function getPendingTestMap(
-  ctrl: vscode.TestController,
-  tests: ReadonlyArray<vscode.TestItem>
-) {
+async function getPendingTestMap(tests: ReadonlyArray<vscode.TestItem>) {
   const queue: Iterable<vscode.TestItem>[] = [tests];
   const titleMap = new Map<string, vscode.TestItem>();
   while (queue.length) {
-    for (const child of queue.pop()!) {
-      const data = itemData.get(child);
+    for (const item of queue.pop()!) {
+      const data = itemData.get(item);
       if (data instanceof TestFile) {
         if (!data.hasBeenRead) {
-          await data.updateFromDisk(ctrl, child);
+          await data.updateFromDisk(item);
         }
-        queue.push(child.children.values());
+        queue.push(item.children.all);
       } else if (data instanceof TestCase) {
-        titleMap.set(data.fullName, child);
+        titleMap.set(data.fullName, item);
       } else {
-        queue.push(child.children.values());
+        queue.push(item.children.all);
       }
     }
   }

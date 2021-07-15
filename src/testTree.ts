@@ -10,8 +10,6 @@ import { extractTestFromNode } from './sourceUtils';
 
 const textDecoder = new TextDecoder('utf-8');
 
-let generationCounter = 0;
-
 type ContentGetter = (uri: vscode.Uri) => Promise<string>;
 
 export const itemData = new WeakMap<vscode.TestItem, VSCodeTest>();
@@ -50,8 +48,6 @@ export const getContentFromFilesystem: ContentGetter = async uri => {
   }
 };
 
-export class TestRoot {}
-
 export class TestFile {
   public hasBeenRead = false;
 
@@ -68,11 +64,11 @@ export class TestFile {
     return relative(join(this.workspaceFolder.uri.fsPath, 'src', 'vs'), this.uri.fsPath);
   }
 
-  public async updateFromDisk(controller: vscode.TestController, item: vscode.TestItem) {
+  public async updateFromDisk(item: vscode.TestItem) {
     try {
       const content = await getContentFromFilesystem(item.uri!);
       item.error = undefined;
-      this.updateFromContents(controller, content, item);
+      this.updateFromContents(content, item);
     } catch (e) {
       item.error = e.stack;
     }
@@ -81,11 +77,7 @@ export class TestFile {
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
-  public updateFromContents(
-    controller: vscode.TestController,
-    content: string,
-    item: vscode.TestItem
-  ) {
+  public updateFromContents(content: string, file: vscode.TestItem) {
     try {
       const ast = ts.createSourceFile(
         this.uri.path.split('/').pop()!,
@@ -95,61 +87,36 @@ export class TestFile {
         ts.ScriptKind.TS
       );
 
-      const parents: vscode.TestItem[] = [item];
-      const thisGeneration = generationCounter++;
+      const parents: { item: vscode.TestItem; children: vscode.TestItem[] }[] = [
+        { item: file, children: [] },
+      ];
       const traverse = (node: ts.Node) => {
         const parent = parents[parents.length - 1];
-        const childData = extractTestFromNode(ast, node, itemData.get(parent)!, thisGeneration);
+        const childData = extractTestFromNode(ast, node, itemData.get(parent.item)!);
         if (!childData) {
           ts.forEachChild(node, traverse);
           return;
         }
 
-        const id = `${item.uri}/${childData.fullName}`.toLowerCase();
-        let child = parent.children.get(id);
-        if (child) {
-          // location is the only thing that changes in existing items
-          child.range = childData.range;
-          (itemData.get(child) as TestCase | TestSuite).generation = thisGeneration;
-        } else {
-          child = controller.createTestItem(id, childData.name, parent, item.uri);
-          itemData.set(child, childData);
-          child.range = childData.range;
-        }
+        const id = `${file.uri}/${childData.fullName}`.toLowerCase();
+        const item = vscode.test.createTestItem(id, childData.name, file.uri);
+        itemData.set(item, childData);
+        item.range = childData.range;
+        parent.children.push(item);
 
         if (childData instanceof TestSuite) {
-          parents.push(child);
+          parents.push({ item: item, children: [] });
           ts.forEachChild(node, traverse);
-          parents.pop();
+          item.children.all = parents.pop()!.children;
         }
       };
 
       ts.forEachChild(ast, traverse);
-      this.prune(item, thisGeneration);
-      item.error = undefined;
+      file.error = undefined;
+      file.children.all = parents[0].children;
       this.hasBeenRead = true;
     } catch (e) {
-      item.error = String(e.stack || e.message);
-    }
-  }
-
-  /**
-   * Removes tests that were deleted from the source. Each test suite and case
-   * has a 'generation' counter which is updated each time we discover it. This
-   * is called after discovery is finished to remove any children who are no
-   * longer in this generation.
-   */
-  private prune(item: vscode.TestItem, thisGeneration: number) {
-    const queue = [item];
-    for (const parent of queue) {
-      for (const child of parent.children.values()) {
-        const data = itemData.get(child) as TestCase | TestSuite;
-        if (data.generation < thisGeneration) {
-          child.dispose();
-        } else if (data instanceof TestSuite) {
-          queue.push(child);
-        }
-      }
+      file.error = String(e.stack || e.message);
     }
   }
 }
@@ -160,7 +127,6 @@ export abstract class TestConstruct {
   constructor(
     public readonly name: string,
     public readonly range: vscode.Range,
-    public generation: number,
     parent?: TestConstruct
   ) {
     this.fullName = parent ? `${parent.fullName} ${name}` : name;
@@ -171,4 +137,4 @@ export class TestSuite extends TestConstruct {}
 
 export class TestCase extends TestConstruct {}
 
-export type VSCodeTest = TestRoot | TestFile | TestSuite | TestCase;
+export type VSCodeTest = TestFile | TestSuite | TestCase;
