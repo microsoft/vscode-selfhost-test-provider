@@ -58,32 +58,32 @@ export async function activate(context: vscode.ExtensionContext) {
     }));
   };
 
-  ctrl.createRunConfiguration(
+  ctrl.createRunProfile(
     'Run in Electron',
-    vscode.TestRunConfigurationGroup.Run,
+    vscode.TestRunProfileGroup.Run,
     createRunHandler(PlatformTestRunner, false),
     true
   );
 
-  ctrl.createRunConfiguration(
+  ctrl.createRunProfile(
     'Debug in Electron',
-    vscode.TestRunConfigurationGroup.Debug,
+    vscode.TestRunProfileGroup.Debug,
     createRunHandler(PlatformTestRunner, true),
     true
   );
 
   for (const [name, arg] of browserArgs) {
-    const cfg = ctrl.createRunConfiguration(
+    const cfg = ctrl.createRunProfile(
       `Run in ${name}`,
-      vscode.TestRunConfigurationGroup.Run,
+      vscode.TestRunProfileGroup.Run,
       createRunHandler(BrowserTestRunner, false, [' --browser', arg])
     );
 
     cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`);
 
-    ctrl.createRunConfiguration(
+    ctrl.createRunProfile(
       `Debug in ${name}`,
-      vscode.TestRunConfigurationGroup.Debug,
+      vscode.TestRunProfileGroup.Debug,
       createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser'])
     );
   }
@@ -142,7 +142,7 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
 
   watcher.onDidCreate(uri => getOrCreateFile(controller, uri));
   watcher.onDidChange(uri => contentChange.fire(uri));
-  watcher.onDidDelete(uri => controller.items.remove(uri.toString()));
+  watcher.onDidDelete(uri => controller.items.delete(uri.toString()));
 
   for (const file of await vscode.workspace.findFiles(pattern)) {
     getOrCreateFile(controller, file);
