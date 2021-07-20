@@ -64,11 +64,11 @@ export class TestFile {
     return relative(join(this.workspaceFolder.uri.fsPath, 'src', 'vs'), this.uri.fsPath);
   }
 
-  public async updateFromDisk(item: vscode.TestItem) {
+  public async updateFromDisk(controller: vscode.TestController, item: vscode.TestItem) {
     try {
       const content = await getContentFromFilesystem(item.uri!);
       item.error = undefined;
-      this.updateFromContents(content, item);
+      this.updateFromContents(controller, content, item);
     } catch (e) {
       item.error = e.stack;
     }
@@ -77,7 +77,7 @@ export class TestFile {
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
-  public updateFromContents(content: string, file: vscode.TestItem) {
+  public updateFromContents(controller: vscode.TestController, content: string, file: vscode.TestItem) {
     try {
       const ast = ts.createSourceFile(
         this.uri.path.split('/').pop()!,
@@ -99,7 +99,7 @@ export class TestFile {
         }
 
         const id = `${file.uri}/${childData.fullName}`.toLowerCase();
-        const item = vscode.test.createTestItem(id, childData.name, file.uri);
+        const item = controller.createTestItem(id, childData.name, file.uri);
         itemData.set(item, childData);
         item.range = childData.range;
         parent.children.push(item);
@@ -107,13 +107,13 @@ export class TestFile {
         if (childData instanceof TestSuite) {
           parents.push({ item: item, children: [] });
           ts.forEachChild(node, traverse);
-          item.children.all = parents.pop()!.children;
+          item.children.replace(parents.pop()!.children);
         }
       };
 
       ts.forEachChild(ast, traverse);
       file.error = undefined;
-      file.children.all = parents[0].children;
+      file.children.replace(parents[0].children);
       this.hasBeenRead = true;
     } catch (e) {
       file.error = String(e.stack || e.message);

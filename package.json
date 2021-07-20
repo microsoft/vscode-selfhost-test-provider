@@ -6,7 +6,7 @@
   "version": "0.2.10",
   "publisher": "ms-vscode",
   "engines": {
-    "vscode": "^1.59.0-20210717"
+    "vscode": "^1.59.0-20210721"
   },
   "categories": [
     "Other"
