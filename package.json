@@ -3,7 +3,7 @@
   "displayName": "VS Code Selfhost Test Provider",
   "description": "Test provider for the VS Code project",
   "enableProposedApi": true,
-  "version": "0.2.9",
+  "version": "0.2.11",
   "publisher": "ms-vscode",
   "engines": {
     "vscode": "^1.59.0-20210715"
