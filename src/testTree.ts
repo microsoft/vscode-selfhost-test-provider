@@ -107,13 +107,13 @@ export class TestFile {
         if (childData instanceof TestSuite) {
           parents.push({ item: item, children: [] });
           ts.forEachChild(node, traverse);
-          item.children.all = parents.pop()!.children;
+          item.children.set(parents.pop()!.children);
         }
       };
 
       ts.forEachChild(ast, traverse);
       file.error = undefined;
-      file.children.all = parents[0].children;
+      file.children.set(parents[0].children);
       this.hasBeenRead = true;
     } catch (e) {
       file.error = String(e.stack || e.message);

@@ -22,6 +22,11 @@ export async function activate(context: vscode.ExtensionContext) {
   const ctrl = vscode.test.createTestController('selfhost-test-controller', 'VS Code Tests');
 
   ctrl.resolveChildrenHandler = async test => {
+    if (!test) {
+      context.subscriptions.push(await startWatchingWorkspace(ctrl));
+      return;
+    }
+
     const data = itemData.get(test);
     if (data instanceof TestFile) {
       // No need to watch this, updates will be triggered on file changes
@@ -35,14 +40,14 @@ export async function activate(context: vscode.ExtensionContext) {
     runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
     debug: boolean,
     args: string[] = []
-  ): vscode.TestRunHandler => async (req, cancellationToken) => {
+  ) => async (req: vscode.TestRunRequest, cancellationToken: vscode.CancellationToken) => {
     const folder = await guessWorkspaceFolder();
     if (!folder) {
       return;
     }
 
     const runner = new runnerCtor(folder);
-    const map = await getPendingTestMap(req.include ?? ctrl.items.all);
+    const map = await getPendingTestMap(req.include ?? gatherTestItems(ctrl.items));
     const task = ctrl.createTestRun(req);
     for (const test of map.values()) {
       task.setState(test, vscode.TestResultState.Queued);
@@ -58,32 +63,32 @@ export async function activate(context: vscode.ExtensionContext) {
     }));
   };
 
-  ctrl.createRunConfiguration(
+  ctrl.createRunProfile(
     'Run in Electron',
-    vscode.TestRunConfigurationGroup.Run,
+    vscode.TestRunProfileGroup.Run,
     createRunHandler(PlatformTestRunner, false),
     true
   );
 
-  ctrl.createRunConfiguration(
+  ctrl.createRunProfile(
     'Debug in Electron',
-    vscode.TestRunConfigurationGroup.Debug,
+    vscode.TestRunProfileGroup.Debug,
     createRunHandler(PlatformTestRunner, true),
     true
   );
 
   for (const [name, arg] of browserArgs) {
-    const cfg = ctrl.createRunConfiguration(
+    const cfg = ctrl.createRunProfile(
       `Run in ${name}`,
-      vscode.TestRunConfigurationGroup.Run,
+      vscode.TestRunProfileGroup.Run,
       createRunHandler(BrowserTestRunner, false, [' --browser', arg])
     );
 
     cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`);
 
-    ctrl.createRunConfiguration(
+    ctrl.createRunProfile(
       `Debug in ${name}`,
-      vscode.TestRunConfigurationGroup.Debug,
+      vscode.TestRunProfileGroup.Debug,
       createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser'])
     );
   }
@@ -142,7 +147,7 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
 
   watcher.onDidCreate(uri => getOrCreateFile(controller, uri));
   watcher.onDidChange(uri => contentChange.fire(uri));
-  watcher.onDidDelete(uri => controller.items.remove(uri.toString()));
+  watcher.onDidDelete(uri => controller.items.delete(uri.toString()));
 
   for (const file of await vscode.workspace.findFiles(pattern)) {
     getOrCreateFile(controller, file);
@@ -161,14 +166,20 @@ async function getPendingTestMap(tests: ReadonlyArray<vscode.TestItem>) {
         if (!data.hasBeenRead) {
           await data.updateFromDisk(item);
         }
-        queue.push(item.children.all);
+        queue.push(gatherTestItems(item.children));
       } else if (data instanceof TestCase) {
         titleMap.set(data.fullName, item);
       } else {
-        queue.push(item.children.all);
+        queue.push(gatherTestItems(item.children));
       }
     }
   }
 
   return titleMap;
+}
+
+function gatherTestItems(collection: vscode.TestItemCollection) {
+  const items: vscode.TestItem[] = [];
+  collection.forEach(item => items.push(item));
+  return items;
 }
