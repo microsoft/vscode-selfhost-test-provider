@@ -77,7 +77,11 @@ export class TestFile {
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
-  public updateFromContents(controller: vscode.TestController, content: string, file: vscode.TestItem) {
+  public updateFromContents(
+    controller: vscode.TestController,
+    content: string,
+    file: vscode.TestItem
+  ) {
     try {
       const ast = ts.createSourceFile(
         this.uri.path.split('/').pop()!,
@@ -99,6 +103,13 @@ export class TestFile {
         }
 
         const id = `${file.uri}/${childData.fullName}`.toLowerCase();
+
+        // Skip duplicated tests. They won't run correctly with the way
+        // mocha reports them, and will error if we try to insert them.
+        if (parent.children.some(c => c.id === id)) {
+          return;
+        }
+
         const item = controller.createTestItem(id, childData.name, file.uri);
         itemData.set(item, childData);
         item.range = childData.range;
