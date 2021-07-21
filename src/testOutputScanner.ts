@@ -149,7 +149,7 @@ export async function scanTestOutput(
               task.appendOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
               if (tcase) {
                 lastTest = tcase;
-                task.setState(tcase, vscode.TestResultState.Passed, evt[1].duration);
+                task.passed(tcase, evt[1].duration);
                 tests.delete(title);
               }
             }
@@ -190,8 +190,7 @@ export async function scanTestOutput(
                   message.location = location ?? testFirstLine;
                   message.actualOutput = String(actual);
                   message.expectedOutput = String(expected);
-                  task.appendMessage(tcase!, message);
-                  task.setState(tcase!, vscode.TestResultState.Failed, duration);
+                  task.failed(tcase!, message, duration);
                 })
               );
             }

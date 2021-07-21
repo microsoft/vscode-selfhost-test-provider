@@ -21,7 +21,7 @@ const browserArgs: [name: string, arg: string][] = [
 export async function activate(context: vscode.ExtensionContext) {
   const ctrl = vscode.tests.createTestController('selfhost-test-controller', 'VS Code Tests');
 
-  ctrl.resolveChildrenHandler = async test => {
+  ctrl.resolveHandler = async test => {
     if (!test) {
       context.subscriptions.push(await startWatchingWorkspace(ctrl));
       return;
@@ -50,7 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const map = await getPendingTestMap(ctrl, req.include ?? gatherTestItems(ctrl.items));
     const task = ctrl.createTestRun(req);
     for (const test of map.values()) {
-      task.setState(test, vscode.TestResultState.Queued);
+      task.enqueued(test)
     }
 
     return (runQueue = runQueue.then(async () => {
