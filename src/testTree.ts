@@ -6,7 +6,7 @@ import { join, relative } from 'path';
 import * as ts from 'typescript';
 import { TextDecoder } from 'util';
 import * as vscode from 'vscode';
-import { extractTestFromNode } from './sourceUtils';
+import { Action, extractTestFromNode } from './sourceUtils';
 
 const textDecoder = new TextDecoder('utf-8');
 
@@ -97,7 +97,11 @@ export class TestFile {
       const traverse = (node: ts.Node) => {
         const parent = parents[parents.length - 1];
         const childData = extractTestFromNode(ast, node, itemData.get(parent.item)!);
-        if (!childData) {
+        if (childData === Action.Skip) {
+          return;
+        }
+
+        if (childData === Action.Recurse) {
           ts.forEachChild(node, traverse);
           return;
         }

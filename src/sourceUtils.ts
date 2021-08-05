@@ -8,20 +8,29 @@ import { TestCase, TestConstruct, TestSuite, VSCodeTest } from './testTree';
 
 const suiteNames = new Set(['suite', 'flakySuite']);
 
+export const enum Action {
+  Skip,
+  Recurse,
+}
+
 export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: VSCodeTest) => {
   if (!ts.isCallExpression(node)) {
-    return undefined;
+    return Action.Recurse;
   }
 
   const lhs = node.expression;
+  if (isSkipCall(lhs)) {
+    return Action.Skip;
+  }
+
   const name = node.arguments[0];
   const func = node.arguments[1];
   if (!name || !ts.isIdentifier(lhs) || !ts.isStringLiteralLike(name)) {
-    return undefined;
+    return Action.Recurse;
   }
 
   if (!func || !ts.isFunctionLike(func)) {
-    return undefined;
+    return Action.Recurse;
   }
 
   const start = src.getLineAndCharacterOfPosition(name.pos);
@@ -40,5 +49,12 @@ export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: V
     return new TestSuite(name.text, range, cparent);
   }
 
-  return undefined;
+  return Action.Recurse;
 };
+
+const isSkipCall = (lhs: ts.LeftHandSideExpression) =>
+  ts.isPropertyAccessExpression(lhs) &&
+  ts.isIdentifier(lhs.expression) &&
+  ts.isIdentifier(lhs.name) &&
+  suiteNames.has(lhs.expression.text) &&
+  lhs.name.text === 'skip';
