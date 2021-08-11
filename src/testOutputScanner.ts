@@ -12,6 +12,7 @@ import { getContentFromFilesystem } from './testTree';
 
 export const enum MochaEvent {
   Start = 'start',
+  TestStart = 'testStart',
   Pass = 'pass',
   Fail = 'fail',
   End = 'end',
@@ -21,13 +22,16 @@ export interface IStartEvent {
   total: number;
 }
 
-export interface IPassEvent {
+export interface ITestStartEvent {
   title: string;
   fullTitle: string;
   file: string;
-  duration: number;
   currentRetry: number;
   speed: string;
+}
+
+export interface IPassEvent extends ITestStartEvent {
+  duration: number;
 }
 
 export interface IFailEvent extends IPassEvent {
@@ -49,6 +53,7 @@ export interface IEndEvent {
 
 export type MochaEventTuple =
   | [MochaEvent.Start, IStartEvent]
+  | [MochaEvent.TestStart, ITestStartEvent]
   | [MochaEvent.Pass, IPassEvent]
   | [MochaEvent.Fail, IFailEvent]
   | [MochaEvent.End, IEndEvent];
@@ -116,7 +121,13 @@ export async function scanTestOutput(
   scanner: TestOutputScanner,
   cancellation: vscode.CancellationToken
 ): Promise<void> {
-  const locationDerivations: Promise<void>[] = [];
+  const exitBlockers: Set<Promise<unknown>> = new Set();
+  const enqueueExitBlocker = <T>(prom: Promise<T>): Promise<T> => {
+    exitBlockers.add(prom);
+    prom.finally(() => exitBlockers.delete(prom));
+    return prom;
+  };
+
   let lastTest: vscode.TestItem | undefined;
 
   try {
@@ -129,19 +140,35 @@ export async function scanTestOutput(
         resolve();
       });
 
+      let currentTest: vscode.TestItem | undefined;
+
+      const defaultAppend = (str: string) => task.appendOutput(str + crlf, undefined, currentTest);
+
       scanner.onRunnerError(err => {
-        task.appendOutput(err + '\r\n');
+        defaultAppend(err);
         resolve();
       });
 
       scanner.onOtherOutput(str => {
-        task.appendOutput(str + '\r\n');
+        const match = spdlogRe.exec(str);
+        if (!match) {
+          return defaultAppend(str);
+        }
+
+        enqueueExitBlocker(
+          getSourceLocation(match[2], Number(match[3]))
+            .then(location => task.appendOutput(match[1] + crlf, location, currentTest))
+            .catch(() => defaultAppend(str))
+        );
       });
 
       scanner.onMochaEvent(evt => {
         switch (evt[0]) {
           case MochaEvent.Start:
             break; // no-op
+          case MochaEvent.TestStart:
+            currentTest = tests.get(evt[1].fullTitle);
+            break;
           case MochaEvent.Pass:
             {
               const title = evt[1].fullTitle;
@@ -184,7 +211,7 @@ export async function scanTestOutput(
                   )
                 );
 
-              locationDerivations.push(
+              enqueueExitBlocker(
                 tryDeriveLocation(rawErr).then(location => {
                   const message = new vscode.TestMessage(tryMakeMarkdown(err));
                   message.location = location ?? testFirstLine;
@@ -201,14 +228,17 @@ export async function scanTestOutput(
         }
       });
     });
-    await Promise.all(locationDerivations);
+    await Promise.all([...exitBlockers]);
   } catch (e) {
-    task.appendOutput(e.stack || e.message);
+    task.appendOutput((e as Error).stack || (e as Error).message);
   } finally {
     scanner.dispose();
     task.end();
   }
 }
+
+const spdlogRe = /"(.+)", source: (file:\/\/\/.*?)+ \(([0-9]+)\)/;
+const crlf = '\r\n';
 
 const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
 
@@ -225,14 +255,12 @@ const tryMakeMarkdown = (message: string) => {
 };
 
 const inlineSourcemapRe = /^\/\/# sourceMappingURL=data:application\/json;base64,(.+)/m;
+const sourceMapBiases = [
+  SourceMapConsumer.GREATEST_LOWER_BOUND,
+  SourceMapConsumer.LEAST_UPPER_BOUND,
+];
 
-async function tryDeriveLocation(stack: string) {
-  const parts = /(file:\/{3}.+):([0-9]+):([0-9]+)/.exec(stack);
-  if (!parts) {
-    return;
-  }
-
-  const [, fileUri, line, col] = parts;
+async function getSourceLocation(fileUri: string, line: number, col = 1) {
   let sourceMap: SourceMapConsumer;
   try {
     const contents = await getContentFromFilesystem(vscode.Uri.parse(fileUri));
@@ -244,21 +272,29 @@ async function tryDeriveLocation(stack: string) {
     const decoded = base64Decode(sourcemapMatch[1]);
     sourceMap = await new SourceMapConsumer(decoded, fileUri);
   } catch (e) {
-    console.warn(`Error parsing sourcemap for ${fileUri}: ${e.stack}`);
+    console.warn(`Error parsing sourcemap for ${fileUri}: ${(e as Error).stack}`);
     return;
   }
 
-  const position = sourceMap.originalPositionFor({
-    column: Number(col) - 1,
-    line: Number(line),
-  });
+  for (const bias of sourceMapBiases) {
+    const position = sourceMap.originalPositionFor({ column: col - 1, line: line, bias });
+    if (position.line !== null && position.column !== null && position.source !== null) {
+      return new vscode.Location(
+        vscode.Uri.parse(position.source),
+        new vscode.Position(position.line - 1, position.column)
+      );
+    }
+  }
 
-  if (position.line === null || position.column === null || position.source === null) {
+  return undefined;
+}
+
+async function tryDeriveLocation(stack: string) {
+  const parts = /(file:\/{3}.+):([0-9]+):([0-9]+)/.exec(stack);
+  if (!parts) {
     return;
   }
 
-  return new vscode.Location(
-    vscode.Uri.parse(position.source),
-    new vscode.Position(position.line - 1, position.column)
-  );
+  const [, fileUri, line, col] = parts;
+  return getSourceLocation(fileUri, Number(line), Number(col));
 }
