@@ -18,9 +18,13 @@ export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: V
     return Action.Recurse;
   }
 
-  const lhs = node.expression;
+  let lhs = node.expression;
   if (isSkipCall(lhs)) {
     return Action.Skip;
+  }
+
+  if (isPropertyCall(lhs) && lhs.name.text === 'only') {
+    lhs = lhs.expression;
   }
 
   const name = node.arguments[0];
@@ -52,9 +56,12 @@ export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: V
   return Action.Recurse;
 };
 
-const isSkipCall = (lhs: ts.LeftHandSideExpression) =>
+const isPropertyCall = (
+  lhs: ts.LeftHandSideExpression
+): lhs is ts.PropertyAccessExpression & { expression: ts.Identifier; name: ts.Identifier } =>
   ts.isPropertyAccessExpression(lhs) &&
   ts.isIdentifier(lhs.expression) &&
-  ts.isIdentifier(lhs.name) &&
-  suiteNames.has(lhs.expression.text) &&
-  lhs.name.text === 'skip';
+  ts.isIdentifier(lhs.name);
+
+const isSkipCall = (lhs: ts.LeftHandSideExpression) =>
+  isPropertyCall(lhs) && suiteNames.has(lhs.expression.text) && lhs.name.text === 'skip';
