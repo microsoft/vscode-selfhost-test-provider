@@ -129,6 +129,7 @@ export async function scanTestOutput(
   };
 
   let lastTest: vscode.TestItem | undefined;
+  let ranAnyTest = false;
 
   try {
     if (cancellation.isCancellationRequested) {
@@ -168,6 +169,7 @@ export async function scanTestOutput(
             break; // no-op
           case MochaEvent.TestStart:
             currentTest = tests.get(evt[1].fullTitle);
+            ranAnyTest = true;
             break;
           case MochaEvent.Pass:
             {
@@ -229,6 +231,11 @@ export async function scanTestOutput(
       });
     });
     await Promise.all([...exitBlockers]);
+
+    // no tests? Possible crash, show output:
+    if (!ranAnyTest) {
+      await vscode.commands.executeCommand('testing.showMostRecentOutput');
+    }
   } catch (e) {
     task.appendOutput((e as Error).stack || (e as Error).message);
   } finally {
