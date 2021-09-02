@@ -61,7 +61,7 @@ export class TestFile {
   }
 
   public getLabel() {
-    return relative(join(this.workspaceFolder.uri.fsPath, 'src', 'vs'), this.uri.fsPath);
+    return relative(join(this.workspaceFolder.uri.fsPath, 'src'), this.uri.fsPath);
   }
 
   public async updateFromDisk(controller: vscode.TestController, item: vscode.TestItem) {
