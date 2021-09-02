@@ -7,7 +7,7 @@ import { scanTestOutput } from './testOutputScanner';
 import { guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
-const TEST_FILE_PATTERN = 'src/vs/**/*.test.ts';
+const TEST_FILE_PATTERN = 'src/**/*.test.ts';
 
 const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
   uri.path.endsWith('.test.ts') ? vscode.workspace.getWorkspaceFolder(uri) : undefined;
