@@ -39,6 +39,8 @@ export interface IFailEvent extends IPassEvent {
   stack: string | null;
   expected?: string;
   actual?: string;
+  expectedJSON?: string;
+  actualJSON?: string;
 }
 
 export interface IEndEvent {
@@ -185,7 +187,16 @@ export async function scanTestOutput(
             break;
           case MochaEvent.Fail:
             {
-              const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
+              const {
+                err,
+                stack,
+                duration,
+                expected,
+                expectedJSON,
+                actual,
+                actualJSON,
+                fullTitle: id,
+              } = evt[1];
               let tcase = tests.get(id);
               // report failures on hook to the last-seen test, or first test if none run yet
               if (!tcase && id.includes('hook for')) {
@@ -217,8 +228,13 @@ export async function scanTestOutput(
                 tryDeriveLocation(rawErr).then(location => {
                   const message = new vscode.TestMessage(tryMakeMarkdown(err));
                   message.location = location ?? testFirstLine;
-                  message.actualOutput = String(actual);
-                  message.expectedOutput = String(expected);
+                  // TODO: Allow to attach meta-data to the message!
+                  // Keep actual/expected as human readable text and add
+                  // JSON encoded metadata, readable by the code-action that can fix failing deep strict equal assertions.
+                  message.actualOutput =
+                    actualJSON !== undefined ? JSON.stringify(actualJSON) : actual;
+                  message.expectedOutput =
+                    expectedJSON !== undefined ? JSON.stringify(expectedJSON) : expected;
                   task.failed(tcase!, message, duration);
                 })
               );

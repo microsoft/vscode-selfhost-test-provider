@@ -3,6 +3,7 @@
  *--------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
 import { scanTestOutput } from './testOutputScanner';
 import { guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
@@ -50,7 +51,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const map = await getPendingTestMap(ctrl, req.include ?? gatherTestItems(ctrl.items));
     const task = ctrl.createTestRun(req);
     for (const test of map.values()) {
-      task.enqueued(test)
+      task.enqueued(test);
     }
 
     return (runQueue = runQueue.then(async () => {
@@ -107,7 +108,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(updateNodeForDocument),
-    vscode.workspace.onDidChangeTextDocument(e => updateNodeForDocument(e.document))
+    vscode.workspace.onDidChangeTextDocument(e => updateNodeForDocument(e.document)),
+    new FailingDeepStrictEqualAssertFixer()
   );
 }
 
