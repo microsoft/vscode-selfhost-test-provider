@@ -8,6 +8,7 @@ import { decode as base64Decode } from 'js-base64';
 import { SourceMapConsumer } from 'source-map';
 import * as split from 'split2';
 import * as vscode from 'vscode';
+import { attachTestMessageMetadata } from './metadata';
 import { getContentFromFilesystem } from './testTree';
 
 export const enum MochaEvent {
@@ -39,8 +40,8 @@ export interface IFailEvent extends IPassEvent {
   stack: string | null;
   expected?: string;
   actual?: string;
-  expectedJSON?: string;
-  actualJSON?: string;
+  expectedJSON?: unknown;
+  actualJSON?: unknown;
 }
 
 export interface IEndEvent {
@@ -228,13 +229,9 @@ export async function scanTestOutput(
                 tryDeriveLocation(rawErr).then(location => {
                   const message = new vscode.TestMessage(tryMakeMarkdown(err));
                   message.location = location ?? testFirstLine;
-                  // TODO: Allow to attach meta-data to the message!
-                  // Keep actual/expected as human readable text and add
-                  // JSON encoded metadata, readable by the code-action that can fix failing deep strict equal assertions.
-                  message.actualOutput =
-                    actualJSON !== undefined ? JSON.stringify(actualJSON) : actual;
-                  message.expectedOutput =
-                    expectedJSON !== undefined ? JSON.stringify(expectedJSON) : expected;
+                  message.actualOutput = String(actual);
+                  message.expectedOutput = String(expected);
+                  attachTestMessageMetadata(message, { expectedValue: expectedJSON, actualValue: actualJSON });
                   task.failed(tcase!, message, duration);
                 })
               );

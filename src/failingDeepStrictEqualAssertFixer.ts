@@ -17,8 +17,9 @@ import {
   TextDocument,
   Uri,
   workspace,
-  WorkspaceEdit,
+  WorkspaceEdit
 } from 'vscode';
+import { getTestMessageMetadata } from './metadata';
 
 const fixExpectedValueCommandId = 'selfhost-test.fix-test';
 
@@ -107,27 +108,19 @@ function detectFailingDeepStrictEqualAssertion(
     toString(m.message).startsWith('Expected values to be strictly deep-equal:\n')
   )[0];
 
-  if (!strictDeepEqualMessage || !strictDeepEqualMessage.actualOutput) {
+  if (!strictDeepEqualMessage) {
     return undefined;
   }
 
-  const actualJSONValue = tryParseJson(strictDeepEqualMessage.actualOutput);
-  if (!actualJSONValue) {
+  const metadata = getTestMessageMetadata(strictDeepEqualMessage);
+  if (!metadata) {
     return undefined;
   }
 
   return {
     assertion: assertion,
-    actualJSONValue,
+    actualJSONValue: metadata.actualValue,
   };
-}
-
-function tryParseJson(value: string): unknown | undefined {
-  try {
-    return JSON.parse(value);
-  } catch (e) {
-    return undefined;
-  }
 }
 
 class DeepStrictEqualAssertion {
