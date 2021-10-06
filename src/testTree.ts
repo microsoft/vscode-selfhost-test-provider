@@ -70,7 +70,7 @@ export class TestFile {
       item.error = undefined;
       this.updateFromContents(controller, content, item);
     } catch (e) {
-      item.error = e.stack;
+      item.error = (e as Error).stack;
     }
   }
 
@@ -131,7 +131,7 @@ export class TestFile {
       file.children.replace(parents[0].children);
       this.hasBeenRead = true;
     } catch (e) {
-      file.error = String(e.stack || e.message);
+      file.error = String((e as Error).stack || (e as Error).message);
     }
   }
 }

@@ -167,7 +167,7 @@ export abstract class VSCodeTestRunner {
     try {
       return JSON.parse(projectJson);
     } catch (e) {
-      throw new Error(`Error parsing product.json: ${e.message}`);
+      throw new Error(`Error parsing product.json: ${(e as Error).message}`);
     }
   }
 
