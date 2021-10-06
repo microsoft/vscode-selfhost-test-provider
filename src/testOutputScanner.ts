@@ -8,6 +8,7 @@ import { decode as base64Decode } from 'js-base64';
 import { SourceMapConsumer } from 'source-map';
 import * as split from 'split2';
 import * as vscode from 'vscode';
+import { attachTestMessageMetadata } from './metadata';
 import { getContentFromFilesystem } from './testTree';
 
 export const enum MochaEvent {
@@ -39,6 +40,8 @@ export interface IFailEvent extends IPassEvent {
   stack: string | null;
   expected?: string;
   actual?: string;
+  expectedJSON?: unknown;
+  actualJSON?: unknown;
 }
 
 export interface IEndEvent {
@@ -185,7 +188,16 @@ export async function scanTestOutput(
             break;
           case MochaEvent.Fail:
             {
-              const { err, stack, duration, expected, actual, fullTitle: id } = evt[1];
+              const {
+                err,
+                stack,
+                duration,
+                expected,
+                expectedJSON,
+                actual,
+                actualJSON,
+                fullTitle: id,
+              } = evt[1];
               let tcase = tests.get(id);
               // report failures on hook to the last-seen test, or first test if none run yet
               if (!tcase && id.includes('hook for')) {
@@ -219,6 +231,7 @@ export async function scanTestOutput(
                   message.location = location ?? testFirstLine;
                   message.actualOutput = String(actual);
                   message.expectedOutput = String(expected);
+                  attachTestMessageMetadata(message, { expectedValue: expectedJSON, actualValue: actualJSON });
                   task.failed(tcase!, message, duration);
                 })
               );
