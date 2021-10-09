@@ -33,7 +33,7 @@ export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: V
     return Action.Recurse;
   }
 
-  if (!func || !ts.isFunctionLike(func)) {
+  if (!func) {
     return Action.Recurse;
   }
 
