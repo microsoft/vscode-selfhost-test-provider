@@ -215,6 +215,8 @@ export async function scanTestOutput(
               }
 
               tests.delete(id);
+              const hasDiff =
+                actual && expected && (expected !== '[undefined]' || actual !== '[undefined]');
               const testFirstLine =
                 tcase.range &&
                 new vscode.Location(
@@ -226,14 +228,25 @@ export async function scanTestOutput(
                 );
 
               enqueueExitBlocker(
-                tryDeriveLocation(rawErr).then(location => {
-                  const message = new vscode.TestMessage(tryMakeMarkdown(err));
+                (async () => {
+                  const location = await tryDeriveLocation(rawErr);
+                  let message: vscode.TestMessage;
+
+                  if (hasDiff) {
+                    message = new vscode.TestMessage(tryMakeMarkdown(err));
+                    message.actualOutput = String(actual);
+                    message.expectedOutput = String(expected);
+                    attachTestMessageMetadata(message, {
+                      expectedValue: expectedJSON,
+                      actualValue: actualJSON,
+                    });
+                  } else {
+                    message = new vscode.TestMessage(stack ? await sourcemapStack(stack) : err);
+                  }
+
                   message.location = location ?? testFirstLine;
-                  message.actualOutput = String(actual);
-                  message.expectedOutput = String(expected);
-                  attachTestMessageMetadata(message, { expectedValue: expectedJSON, actualValue: actualJSON });
                   task.failed(tcase!, message, duration);
-                })
+                })()
               );
             }
             break;
@@ -261,6 +274,33 @@ const spdlogRe = /"(.+)", source: (file:\/\/\/.*?)+ \(([0-9]+)\)/;
 const crlf = '\r\n';
 
 const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
+
+const sourcemapStack = async (str: string) => {
+  locationRe.lastIndex = 0;
+
+  const replacements = await Promise.all(
+    [...str.matchAll(locationRe)].map(async match => {
+      const location = await deriveSourceLocation(match);
+      if (!location) {
+        return;
+      }
+      return {
+        from: match[0],
+        to: location?.uri.with({
+          fragment: `L${location.range.start.line}:${location.range.start.character}`,
+        }),
+      };
+    })
+  );
+
+  for (const replacement of replacements) {
+    if (replacement) {
+      str = str.replace(replacement.from, replacement.to.toString(true));
+    }
+  }
+
+  return str;
+};
 
 const tryMakeMarkdown = (message: string) => {
   const lines = message.split('\n');
@@ -309,12 +349,19 @@ async function getSourceLocation(fileUri: string, line: number, col = 1) {
   return undefined;
 }
 
+const locationRe = /(file:\/{3}.+):([0-9]+):([0-9]+)/g;
+
 async function tryDeriveLocation(stack: string) {
-  const parts = /(file:\/{3}.+):([0-9]+):([0-9]+)/.exec(stack);
+  locationRe.lastIndex = 0;
+  const parts = locationRe.exec(stack);
   if (!parts) {
     return;
   }
 
+  return deriveSourceLocation(parts);
+}
+
+async function deriveSourceLocation(parts: RegExpMatchArray) {
   const [, fileUri, line, col] = parts;
   return getSourceLocation(fileUri, Number(line), Number(col));
 }
