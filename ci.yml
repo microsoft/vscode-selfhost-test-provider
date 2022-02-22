@@ -28,5 +28,8 @@ extends:
       - script: npm install
         displayName: Install dependencies
 
+      - script: npm test
+        displayName: Test
+
       - script: npm run compile
         displayName: Compile
