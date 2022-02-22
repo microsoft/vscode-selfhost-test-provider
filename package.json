@@ -2,7 +2,9 @@
   "name": "vscode-selfhost-test-provider",
   "displayName": "VS Code Selfhost Test Provider",
   "description": "Test provider for the VS Code project",
-  "enableProposedApi": true,
+  "enabledApiProposals": [
+    "testObserver"
+  ],
   "version": "0.3.8",
   "publisher": "ms-vscode",
   "engines": {
@@ -42,9 +44,7 @@
     "package": "webpack --mode production --devtool hidden-source-map --config ./build/node-extension.webpack.config.js",
     "fmt": "prettier --write \"src/**/*.ts\"&& npm run test -- --fix",
     "test": "tsc --noEmit && eslint src --ext ts",
-    "download-api": "vscode-dts dev",
-    "postdownload-api": "vscode-dts master",
-    "postinstall": "npm run download-api"
+    "postinstall": "vscode-dts main && vscode-dts dev"
   },
   "devDependencies": {
     "@types/node": "^16.11.1",
@@ -58,7 +58,7 @@
     "source-map": "^0.7.3",
     "ts-loader": "^9.2.6",
     "vscode-debugprotocol": "^1.49.0",
-    "vscode-dts": "^0.3.1",
+    "vscode-dts": "^0.3.3",
     "webpack": "^5.59.0",
     "webpack-cli": "^4.9.1"
   },
