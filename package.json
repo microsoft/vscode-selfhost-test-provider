@@ -5,7 +5,7 @@
   "enabledApiProposals": [
     "testObserver"
   ],
-  "version": "0.3.8",
+  "version": "0.3.9",
   "publisher": "ms-vscode",
   "engines": {
     "vscode": "^1.59.0-20210722"
