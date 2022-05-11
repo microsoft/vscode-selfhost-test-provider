@@ -13,7 +13,19 @@ export const enum Action {
   Recurse,
 }
 
+export class ImportDeclaration {
+  public get basename() {
+    return this.text.split('/').pop()!;
+  }
+
+  constructor(public readonly text: string) {}
+}
+
 export const extractTestFromNode = (src: ts.SourceFile, node: ts.Node, parent: VSCodeTest) => {
+  if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
+    return new ImportDeclaration(node.moduleSpecifier.text);
+  }
+
   if (!ts.isCallExpression(node)) {
     return Action.Recurse;
   }

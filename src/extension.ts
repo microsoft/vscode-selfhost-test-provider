@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
+import { updateRelatedCodeForImplementation } from './relatedCode';
 import { scanTestOutput } from './testOutputScanner';
 import { guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
@@ -37,32 +38,34 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   let runQueue = Promise.resolve();
-  const createRunHandler = (
-    runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
-    debug: boolean,
-    args: string[] = []
-  ) => async (req: vscode.TestRunRequest, cancellationToken: vscode.CancellationToken) => {
-    const folder = await guessWorkspaceFolder();
-    if (!folder) {
-      return;
-    }
+  const createRunHandler =
+    (
+      runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
+      debug: boolean,
+      args: string[] = []
+    ) =>
+    async (req: vscode.TestRunRequest, cancellationToken: vscode.CancellationToken) => {
+      const folder = await guessWorkspaceFolder();
+      if (!folder) {
+        return;
+      }
 
-    const runner = new runnerCtor(folder);
-    const map = await getPendingTestMap(ctrl, req.include ?? gatherTestItems(ctrl.items));
-    const task = ctrl.createTestRun(req);
-    for (const test of map.values()) {
-      task.enqueued(test);
-    }
+      const runner = new runnerCtor(folder);
+      const map = await getPendingTestMap(ctrl, req.include ?? gatherTestItems(ctrl.items));
+      const task = ctrl.createTestRun(req);
+      for (const test of map.values()) {
+        task.enqueued(test);
+      }
 
-    return (runQueue = runQueue.then(async () => {
-      await scanTestOutput(
-        map,
-        task,
-        debug ? await runner.debug(args, req.include) : await runner.run(args, req.include),
-        cancellationToken
-      );
-    }));
-  };
+      return (runQueue = runQueue.then(async () => {
+        await scanTestOutput(
+          map,
+          task,
+          debug ? await runner.debug(args, req.include) : await runner.run(args, req.include),
+          cancellationToken
+        );
+      }));
+    };
 
   ctrl.createRunProfile(
     'Run in Electron',
@@ -99,6 +102,8 @@ export async function activate(context: vscode.ExtensionContext) {
     const data = node && itemData.get(node);
     if (data instanceof TestFile) {
       data.updateFromContents(ctrl, e.getText(), node!);
+    } else {
+      updateRelatedCodeForImplementation(e.uri, ctrl.items, e.getText());
     }
   }
 

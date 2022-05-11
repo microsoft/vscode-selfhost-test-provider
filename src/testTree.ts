@@ -6,7 +6,8 @@ import { join, relative } from 'path';
 import * as ts from 'typescript';
 import { TextDecoder } from 'util';
 import * as vscode from 'vscode';
-import { Action, extractTestFromNode } from './sourceUtils';
+import { updatedRelatedCodeForTestFile } from './relatedCode';
+import { Action, extractTestFromNode, ImportDeclaration } from './sourceUtils';
 
 const textDecoder = new TextDecoder('utf-8');
 
@@ -50,11 +51,15 @@ export const getContentFromFilesystem: ContentGetter = async uri => {
 
 export class TestFile {
   public hasBeenRead = false;
+  public relatedCodeFile: vscode.Uri | undefined;
+  private readonly basename: string;
 
   constructor(
     public readonly uri: vscode.Uri,
     public readonly workspaceFolder: vscode.WorkspaceFolder
-  ) {}
+  ) {
+    this.basename = uri.path.split('/').pop()!;
+  }
 
   public getId() {
     return this.uri.toString().toLowerCase();
@@ -68,7 +73,7 @@ export class TestFile {
     try {
       const content = await getContentFromFilesystem(item.uri!);
       item.error = undefined;
-      this.updateFromContents(controller, content, item);
+      await this.updateFromContents(controller, content, item);
     } catch (e) {
       item.error = (e as Error).stack;
     }
@@ -77,7 +82,7 @@ export class TestFile {
   /**
    * Refreshes all tests in this file, `sourceReader` provided by the root.
    */
-  public updateFromContents(
+  public async updateFromContents(
     controller: vscode.TestController,
     content: string,
     file: vscode.TestItem
@@ -106,6 +111,19 @@ export class TestFile {
           return;
         }
 
+        if (childData instanceof ImportDeclaration) {
+          // yes, we make a lof of assumptions here. But it's all heuristic.
+          // We could get higher accuracy by using the type checker, but that
+          // would be much, much slower (and more complicated,
+          // especially for edit files)
+          if (childData.text.startsWith('vs/') && this.basename.includes(childData.basename)) {
+            this.relatedCodeFile = vscode.Uri.file(
+              join(this.workspaceFolder.uri.fsPath, 'src', `${childData.text}.ts`)
+            );
+          }
+          return;
+        }
+
         const id = `${file.uri}/${childData.fullName}`.toLowerCase();
 
         // Skip duplicated tests. They won't run correctly with the way
@@ -127,6 +145,7 @@ export class TestFile {
       };
 
       ts.forEachChild(ast, traverse);
+      await updatedRelatedCodeForTestFile(this, parents[0].children);
       file.error = undefined;
       file.children.replace(parents[0].children);
       this.hasBeenRead = true;
