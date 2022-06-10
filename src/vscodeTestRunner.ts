@@ -132,15 +132,24 @@ export abstract class VSCodeTestRunner {
     }
 
     const grepRe: string[] = [];
-    const runPaths: string[] = [];
+    const runPaths = new Set<string>();
+    const addTestFileRunPath = (data: TestFile) =>
+      runPaths.add(
+        path.relative(data.workspaceFolder.uri.fsPath, data.uri.fsPath).replace(/\\/g, '/')
+      );
+
     for (const test of filter) {
       const data = itemData.get(test);
       if (data instanceof TestCase || data instanceof TestSuite) {
         grepRe.push(escapeRe(data.fullName) + (data instanceof TestCase ? '$' : ' '));
+        for (let p = test.parent; p; p = p.parent) {
+          const parentData = itemData.get(p);
+          if (parentData instanceof TestFile) {
+            addTestFileRunPath(parentData);
+          }
+        }
       } else if (data instanceof TestFile) {
-        runPaths.push(
-          path.relative(data.workspaceFolder.uri.fsPath, test.uri!.fsPath).replace(/\\/g, '/')
-        );
+        addTestFileRunPath(data);
       }
     }
 
@@ -148,8 +157,8 @@ export abstract class VSCodeTestRunner {
       args.push('--grep', `/^(${grepRe.join('|')})/`);
     }
 
-    if (runPaths.length) {
-      args.push(...runPaths.flatMap(p => ['--run', p]));
+    if (runPaths.size) {
+      args.push(...[...runPaths].flatMap(p => ['--run', p]));
     }
 
     return args;
