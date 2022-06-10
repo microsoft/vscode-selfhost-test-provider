@@ -125,6 +125,7 @@ export async function scanTestOutput(
   cancellation: vscode.CancellationToken
 ): Promise<void> {
   const exitBlockers: Set<Promise<unknown>> = new Set();
+  const skippedTests = new Set(tests.values());
   const enqueueExitBlocker = <T>(prom: Promise<T>): Promise<T> => {
     exitBlockers.add(prom);
     prom.finally(() => exitBlockers.delete(prom));
@@ -172,6 +173,7 @@ export async function scanTestOutput(
             break; // no-op
           case MochaEvent.TestStart:
             currentTest = tests.get(evt[1].fullTitle);
+            skippedTests.delete(currentTest!);
             ranAnyTest = true;
             break;
           case MochaEvent.Pass:
@@ -266,6 +268,9 @@ export async function scanTestOutput(
     task.appendOutput((e as Error).stack || (e as Error).message);
   } finally {
     scanner.dispose();
+    for (const test of skippedTests) {
+      task.skipped(test);
+    }
     task.end();
   }
 }
