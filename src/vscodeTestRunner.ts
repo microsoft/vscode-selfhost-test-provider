@@ -63,23 +63,21 @@ export abstract class VSCodeTestRunner {
           return;
         }
 
-        let breakpointRequestId: number | undefined;
+        let initRequestId: number | undefined;
 
         return {
           onDidSendMessage(message) {
-            if (message.type === 'response' && message.request_seq === breakpointRequestId) {
+            if (message.type === 'response' && message.request_seq === initRequestId) {
               server.ready();
             }
           },
           onWillReceiveMessage(message) {
-            if (breakpointRequestId !== undefined) {
+            if (initRequestId !== undefined) {
               return;
             }
 
-            if (message.command === 'configurationDone') {
-              server.ready();
-            } else if (message.command === 'setBreakpoints') {
-              breakpointRequestId = message.seq;
+            if (message.command === 'launch' || message.command === 'attach') {
+              initRequestId = message.seq;
             }
           },
         };
