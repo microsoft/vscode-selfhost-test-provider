@@ -236,8 +236,8 @@ export async function scanTestOutput(
 
                   if (hasDiff) {
                     message = new vscode.TestMessage(tryMakeMarkdown(err));
-                    message.actualOutput = String(actual);
-                    message.expectedOutput = String(expected);
+                    message.actualOutput = outputToString(actual);
+                    message.expectedOutput = outputToString(expected);
                     attachTestMessageMetadata(message, {
                       expectedValue: expectedJSON,
                       actualValue: actualJSON,
@@ -306,6 +306,9 @@ const sourcemapStack = async (str: string) => {
 
   return str;
 };
+
+const outputToString = (output: unknown) =>
+  typeof output === 'object' ? JSON.stringify(output, null, 2) : String(output);
 
 const tryMakeMarkdown = (message: string) => {
   const lines = message.split('\n');
