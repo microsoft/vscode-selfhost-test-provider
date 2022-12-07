@@ -8,7 +8,7 @@
 
 		{
 			"name": "Run Extension",
-			"type": "pwa-extensionHost",
+			"type": "extensionHost",
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}"
@@ -20,7 +20,7 @@
 		},
 		{
 			"name": "Extension Tests",
-			"type": "pwa-extensionHost",
+			"type": "extensionHost",
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",

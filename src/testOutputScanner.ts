@@ -2,10 +2,15 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
+import {
+  GREATEST_LOWER_BOUND,
+  LEAST_UPPER_BOUND,
+  originalPositionFor,
+  TraceMap,
+} from '@jridgewell/trace-mapping';
 import styles from 'ansi-styles';
 import { ChildProcessWithoutNullStreams } from 'child_process';
 import { decode as base64Decode } from 'js-base64';
-import { SourceMapConsumer } from 'source-map';
 import * as split from 'split2';
 import * as vscode from 'vscode';
 import { attachTestMessageMetadata } from './metadata';
@@ -320,13 +325,10 @@ const tryMakeMarkdown = (message: string) => {
 };
 
 const inlineSourcemapRe = /^\/\/# sourceMappingURL=data:application\/json;base64,(.+)/m;
-const sourceMapBiases = [
-  SourceMapConsumer.GREATEST_LOWER_BOUND,
-  SourceMapConsumer.LEAST_UPPER_BOUND,
-];
+const sourceMapBiases = [GREATEST_LOWER_BOUND, LEAST_UPPER_BOUND] as const;
 
 async function getSourceLocation(fileUri: string, line: number, col = 1) {
-  let sourceMap: SourceMapConsumer;
+  let sourceMap: TraceMap;
   try {
     const contents = await getContentFromFilesystem(vscode.Uri.parse(fileUri));
     const sourcemapMatch = inlineSourcemapRe.exec(contents);
@@ -335,14 +337,14 @@ async function getSourceLocation(fileUri: string, line: number, col = 1) {
     }
 
     const decoded = base64Decode(sourcemapMatch[1]);
-    sourceMap = await new SourceMapConsumer(decoded, fileUri);
+    sourceMap = new TraceMap(decoded, fileUri);
   } catch (e) {
     console.warn(`Error parsing sourcemap for ${fileUri}: ${(e as Error).stack}`);
     return;
   }
 
   for (const bias of sourceMapBiases) {
-    const position = sourceMap.originalPositionFor({ column: col - 1, line: line, bias });
+    const position = originalPositionFor(sourceMap, { column: col - 1, line: line, bias });
     if (position.line !== null && position.column !== null && position.source !== null) {
       return new vscode.Location(
         vscode.Uri.parse(position.source),

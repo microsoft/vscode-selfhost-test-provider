@@ -3,7 +3,6 @@
 'use strict';
 
 const path = require('path');
-const CopyPlugin = require('copy-webpack-plugin');
 
 const config = {
   target: 'node', // vscode extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
@@ -37,10 +36,5 @@ const config = {
       },
     ],
   },
-  plugins: [
-    new CopyPlugin({
-      patterns: [{ from: 'node_modules/source-map/lib/mappings.wasm', to: './', }],
-    }),
-  ],
 };
 module.exports = config;
