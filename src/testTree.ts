@@ -9,10 +9,13 @@ import * as vscode from 'vscode';
 import { Action, extractTestFromNode } from './sourceUtils';
 
 const textDecoder = new TextDecoder('utf-8');
+const diagnosticCollection = vscode.languages.createDiagnosticCollection('selfhostTestProvider');
 
 type ContentGetter = (uri: vscode.Uri) => Promise<string>;
 
 export const itemData = new WeakMap<vscode.TestItem, VSCodeTest>();
+
+export const clearFileDiagnostics = (uri: vscode.Uri) => diagnosticCollection.delete(uri);
 
 /**
  * Tries to guess which workspace folder VS Code is in.
@@ -83,6 +86,7 @@ export class TestFile {
     file: vscode.TestItem
   ) {
     try {
+      const diagnostics: vscode.Diagnostic[] = [];
       const ast = ts.createSourceFile(
         this.uri.path.split('/').pop()!,
         content,
@@ -110,7 +114,22 @@ export class TestFile {
 
         // Skip duplicated tests. They won't run correctly with the way
         // mocha reports them, and will error if we try to insert them.
-        if (parent.children.some(c => c.id === id)) {
+        const existing = parent.children.find(c => c.id === id);
+        if (existing) {
+          const diagnostic = new vscode.Diagnostic(
+            childData.range,
+            'Duplicate tests cannot be run individually and will not be reported correctly by the test framework. Please rename them.',
+            vscode.DiagnosticSeverity.Warning
+          );
+
+          diagnostic.relatedInformation = [
+            new vscode.DiagnosticRelatedInformation(
+              new vscode.Location(existing.uri!, existing.range!),
+              'First declared here'
+            ),
+          ];
+
+          diagnostics.push(diagnostic);
           return;
         }
 
@@ -129,6 +148,7 @@ export class TestFile {
       ts.forEachChild(ast, traverse);
       file.error = undefined;
       file.children.replace(parents[0].children);
+      diagnosticCollection.set(this.uri, diagnostics.length ? diagnostics : undefined);
       this.hasBeenRead = true;
     } catch (e) {
       file.error = String((e as Error).stack || (e as Error).message);
