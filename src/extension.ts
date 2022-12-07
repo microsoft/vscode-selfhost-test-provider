@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
 import { scanTestOutput } from './testOutputScanner';
-import { guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
+import { clearFileDiagnostics, guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
 const TEST_FILE_PATTERN = 'src/**/*.test.ts';
@@ -156,7 +156,10 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
 
   watcher.onDidCreate(uri => getOrCreateFile(controller, uri));
   watcher.onDidChange(uri => contentChange.fire(uri));
-  watcher.onDidDelete(uri => controller.items.delete(uri.toString()));
+  watcher.onDidDelete(uri => {
+    clearFileDiagnostics(uri);
+    controller.items.delete(uri.toString());
+  });
 
   for (const file of await vscode.workspace.findFiles(pattern)) {
     getOrCreateFile(controller, file);
