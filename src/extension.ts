@@ -5,7 +5,13 @@
 import * as vscode from 'vscode';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
 import { scanTestOutput } from './testOutputScanner';
-import { clearFileDiagnostics, guessWorkspaceFolder, itemData, TestCase, TestFile } from './testTree';
+import {
+  clearFileDiagnostics,
+  guessWorkspaceFolder,
+  itemData,
+  TestCase,
+  TestFile,
+} from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
 const TEST_FILE_PATTERN = 'src/**/*.test.ts';
@@ -21,10 +27,11 @@ const browserArgs: [name: string, arg: string][] = [
 
 export async function activate(context: vscode.ExtensionContext) {
   const ctrl = vscode.tests.createTestController('selfhost-test-controller', 'VS Code Tests');
+  const fileChangedEmitter = new vscode.EventEmitter<vscode.Uri>();
 
   ctrl.resolveHandler = async test => {
     if (!test) {
-      context.subscriptions.push(await startWatchingWorkspace(ctrl));
+      context.subscriptions.push(await startWatchingWorkspace(ctrl, fileChangedEmitter));
       return;
     }
 
@@ -37,13 +44,15 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   let runQueue = Promise.resolve();
-  const createRunHandler =
-    (
-      runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
-      debug: boolean,
-      args: string[] = []
-    ) =>
-    async (req: vscode.TestRunRequest, cancellationToken: vscode.CancellationToken) => {
+  const createRunHandler = (
+    runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
+    debug: boolean,
+    args: string[] = []
+  ) => {
+    const doTestRun = async (
+      req: vscode.TestRunRequest,
+      cancellationToken: vscode.CancellationToken
+    ) => {
       const folder = await guessWorkspaceFolder();
       if (!folder) {
         return;
@@ -66,10 +75,43 @@ export async function activate(context: vscode.ExtensionContext) {
       }));
     };
 
+    return async (req: vscode.TestRunRequest2, cancellationToken: vscode.CancellationToken) => {
+      if (!req.continuous) {
+        return doTestRun(req, cancellationToken);
+      }
+
+      const queuedFiles = new Set<vscode.Uri>();
+      let debounced: NodeJS.Timer | undefined;
+
+      const listener = fileChangedEmitter.event(uri => {
+        clearTimeout(debounced);
+        queuedFiles.add(uri);
+
+        debounced = setTimeout(() => {
+          const items = [...queuedFiles]
+            .map(f => getOrCreateFile(ctrl, f))
+            .filter((f): f is vscode.TestItem => !!f);
+          queuedFiles.clear();
+          doTestRun(
+            new vscode.TestRunRequest2(items, undefined, req.profile, true),
+            cancellationToken
+          );
+        }, 1000);
+      });
+
+      cancellationToken.onCancellationRequested(() => {
+        clearTimeout(debounced);
+        listener.dispose();
+      });
+    };
+  };
+
   ctrl.createRunProfile(
     'Run in Electron',
     vscode.TestRunProfileKind.Run,
     createRunHandler(PlatformTestRunner, false),
+    true,
+    undefined,
     true
   );
 
@@ -77,6 +119,8 @@ export async function activate(context: vscode.ExtensionContext) {
     'Debug in Electron',
     vscode.TestRunProfileKind.Debug,
     createRunHandler(PlatformTestRunner, true),
+    true,
+    undefined,
     true
   );
 
@@ -84,7 +128,10 @@ export async function activate(context: vscode.ExtensionContext) {
     const cfg = ctrl.createRunProfile(
       `Run in ${name}`,
       vscode.TestRunProfileKind.Run,
-      createRunHandler(BrowserTestRunner, false, [' --browser', arg])
+      createRunHandler(BrowserTestRunner, false, [' --browser', arg]),
+      undefined,
+      undefined,
+      true
     );
 
     cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`);
@@ -92,7 +139,10 @@ export async function activate(context: vscode.ExtensionContext) {
     ctrl.createRunProfile(
       `Debug in ${name}`,
       vscode.TestRunProfileKind.Debug,
-      createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser'])
+      createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser']),
+      undefined,
+      undefined,
+      true
     );
   }
 
@@ -144,7 +194,10 @@ function gatherTestItems(collection: vscode.TestItemCollection) {
   return items;
 }
 
-async function startWatchingWorkspace(controller: vscode.TestController) {
+async function startWatchingWorkspace(
+  controller: vscode.TestController,
+  fileChangedEmitter: vscode.EventEmitter<vscode.Uri>
+) {
   const workspaceFolder = await guessWorkspaceFolder();
   if (!workspaceFolder) {
     return new vscode.Disposable(() => undefined);
@@ -152,10 +205,12 @@ async function startWatchingWorkspace(controller: vscode.TestController) {
 
   const pattern = new vscode.RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
   const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-  const contentChange = new vscode.EventEmitter<vscode.Uri>();
 
-  watcher.onDidCreate(uri => getOrCreateFile(controller, uri));
-  watcher.onDidChange(uri => contentChange.fire(uri));
+  watcher.onDidCreate(uri => {
+    getOrCreateFile(controller, uri);
+    fileChangedEmitter.fire(uri);
+  });
+  watcher.onDidChange(uri => fileChangedEmitter.fire(uri));
   watcher.onDidDelete(uri => {
     clearFileDiagnostics(uri);
     controller.items.delete(uri.toString());
