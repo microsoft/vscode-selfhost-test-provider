@@ -6,7 +6,7 @@
     "testObserver",
     "testContinuousRun"
   ],
-  "version": "0.3.11",
+  "version": "0.3.12",
   "publisher": "ms-vscode",
   "engines": {
     "vscode": "^1.59.0-20210722"
