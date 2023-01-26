@@ -7,7 +7,7 @@
     "testContinuousRun"
   ],
   "icon": "icon.png",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "publisher": "ms-vscode",
   "engines": {
     "vscode": "^1.59.0-20210722"
