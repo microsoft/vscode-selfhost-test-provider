@@ -6,6 +6,7 @@
     "testObserver",
     "testContinuousRun"
   ],
+  "icon": "icon.png",
   "version": "0.3.12",
   "publisher": "ms-vscode",
   "engines": {
@@ -30,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/microsoft/vscode-selfhost-test-provider.git"
+    "url": "https://github.com/microsoft/vscode-selfhost-test-provider.git"
   },
   "author": "Connor Peet <connor@peet.io>",
   "license": "MIT",
