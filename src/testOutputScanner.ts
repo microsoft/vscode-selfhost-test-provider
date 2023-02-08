@@ -222,8 +222,9 @@ export async function scanTestOutput(
               }
 
               tests.delete(id);
+
               const hasDiff =
-                actual && expected && (expected !== '[undefined]' || actual !== '[undefined]');
+                (actual !== undefined) && (expected !== undefined) && (expected !== '[undefined]' || actual !== '[undefined]');
               const testFirstLine =
                 tcase.range &&
                 new vscode.Location(
