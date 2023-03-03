@@ -14,10 +14,12 @@ import {
 } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
-const TEST_FILE_PATTERN = 'src/**/*.test.ts';
+const TEST_FILE_PATTERN = 'src/**/*.{test,integrationTest}.ts';
 
 const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
-  uri.path.endsWith('.test.ts') ? vscode.workspace.getWorkspaceFolder(uri) : undefined;
+  uri.path.endsWith('.test.ts') || uri.path.endsWith('.integrationTest.ts')
+    ? vscode.workspace.getWorkspaceFolder(uri)
+    : undefined;
 
 const browserArgs: [name: string, arg: string][] = [
   ['Chrome', 'chromium'],
