@@ -102,9 +102,12 @@ const formatJsonValue = (value: unknown) => {
         identifierLikeRe.test(node.name.text)
           ? ts.factory.createPropertyAssignment(
               ts.factory.createIdentifier(node.name.text),
-              node.initializer
+              ts.visitNode(node.initializer, visitor)
             )
+          : ts.isStringLiteralLike(node) && node.text === '[undefined]'
+          ? ts.factory.createIdentifier('undefined')
           : ts.visitEachChild(node, visitor, context);
+
       return ts.visitNode(node, visitor);
     },
   ]);
