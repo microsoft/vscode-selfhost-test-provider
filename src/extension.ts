@@ -77,7 +77,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }));
     };
 
-    return async (req: vscode.TestRunRequest2, cancellationToken: vscode.CancellationToken) => {
+    return async (req: vscode.TestRunRequest, cancellationToken: vscode.CancellationToken) => {
       if (!req.continuous) {
         return doTestRun(req, cancellationToken);
       }
@@ -95,7 +95,7 @@ export async function activate(context: vscode.ExtensionContext) {
             .filter((f): f is vscode.TestItem => !!f);
           queuedFiles.clear();
           doTestRun(
-            new vscode.TestRunRequest2(items, undefined, req.profile, true),
+            new vscode.TestRunRequest(items, undefined, req.profile, true),
             cancellationToken
           );
         }, 1000);
