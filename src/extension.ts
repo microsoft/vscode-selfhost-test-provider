@@ -27,9 +27,11 @@ const browserArgs: [name: string, arg: string][] = [
   ['Webkit', 'webkit'],
 ];
 
+type FileChangeEvent = { uri: vscode.Uri; removed: boolean };
+
 export async function activate(context: vscode.ExtensionContext) {
   const ctrl = vscode.tests.createTestController('selfhost-test-controller', 'VS Code Tests');
-  const fileChangedEmitter = new vscode.EventEmitter<vscode.Uri>();
+  const fileChangedEmitter = new vscode.EventEmitter<FileChangeEvent>();
 
   ctrl.resolveHandler = async test => {
     if (!test) {
@@ -82,20 +84,32 @@ export async function activate(context: vscode.ExtensionContext) {
         return doTestRun(req, cancellationToken);
       }
 
-      const queuedFiles = new Set<vscode.Uri>();
+      const queuedFiles = new Set<string>();
       let debounced: NodeJS.Timer | undefined;
 
-      const listener = fileChangedEmitter.event(uri => {
+      const listener = fileChangedEmitter.event(({ uri, removed }) => {
         clearTimeout(debounced);
-        queuedFiles.add(uri);
+
+        if (req.include && !req.include.some(i => i.uri?.toString() === uri.toString())) {
+          return;
+        }
+
+        if (removed) {
+          queuedFiles.delete(uri.toString());
+        } else {
+          queuedFiles.add(uri.toString());
+        }
 
         debounced = setTimeout(() => {
-          const items = [...queuedFiles]
-            .map(f => getOrCreateFile(ctrl, f))
-            .filter((f): f is vscode.TestItem => !!f);
+          const include =
+            req.include?.filter(t => t.uri && queuedFiles.has(t.uri?.toString())) ??
+            [...queuedFiles]
+              .map(f => getOrCreateFile(ctrl, vscode.Uri.parse(f)))
+              .filter((f): f is vscode.TestItem => !!f);
           queuedFiles.clear();
+
           doTestRun(
-            new vscode.TestRunRequest(items, undefined, req.profile, true),
+            new vscode.TestRunRequest(include, req.exclude, req.profile, true),
             cancellationToken
           );
         }, 1000);
@@ -198,7 +212,7 @@ function gatherTestItems(collection: vscode.TestItemCollection) {
 
 async function startWatchingWorkspace(
   controller: vscode.TestController,
-  fileChangedEmitter: vscode.EventEmitter<vscode.Uri>
+  fileChangedEmitter: vscode.EventEmitter<FileChangeEvent>
 ) {
   const workspaceFolder = await guessWorkspaceFolder();
   if (!workspaceFolder) {
@@ -210,10 +224,11 @@ async function startWatchingWorkspace(
 
   watcher.onDidCreate(uri => {
     getOrCreateFile(controller, uri);
-    fileChangedEmitter.fire(uri);
+    fileChangedEmitter.fire({ removed: false, uri });
   });
-  watcher.onDidChange(uri => fileChangedEmitter.fire(uri));
+  watcher.onDidChange(uri => fileChangedEmitter.fire({ removed: false, uri }));
   watcher.onDidDelete(uri => {
+    fileChangedEmitter.fire({ removed: true, uri });
     clearFileDiagnostics(uri);
     controller.items.delete(uri.toString());
   });
