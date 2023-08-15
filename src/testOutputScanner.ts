@@ -14,6 +14,7 @@ import { decode as base64Decode } from 'js-base64';
 import * as split from 'split2';
 import * as vscode from 'vscode';
 import { attachTestMessageMetadata } from './metadata';
+import { snapshotComment } from './snapshot';
 import { getContentFromFilesystem } from './testTree';
 
 export const enum MochaEvent {
@@ -47,6 +48,7 @@ export interface IFailEvent extends IPassEvent {
   actual?: string;
   expectedJSON?: unknown;
   actualJSON?: unknown;
+  snapshotPath?: string;
 }
 
 export interface IEndEvent {
@@ -177,8 +179,9 @@ export async function scanTestOutput(
           case MochaEvent.Start:
             break; // no-op
           case MochaEvent.TestStart:
-            currentTest = tests.get(evt[1].fullTitle);
-            skippedTests.delete(currentTest!);
+            currentTest = tests.get(evt[1].fullTitle)!;
+            skippedTests.delete(currentTest);
+            task.started(currentTest);
             ranAnyTest = true;
             break;
           case MochaEvent.Pass:
@@ -203,6 +206,7 @@ export async function scanTestOutput(
                 expectedJSON,
                 actual,
                 actualJSON,
+                snapshotPath,
                 fullTitle: id,
               } = evt[1];
               let tcase = tests.get(id);
@@ -224,7 +228,9 @@ export async function scanTestOutput(
               tests.delete(id);
 
               const hasDiff =
-                (actual !== undefined) && (expected !== undefined) && (expected !== '[undefined]' || actual !== '[undefined]');
+                actual !== undefined &&
+                expected !== undefined &&
+                (expected !== '[undefined]' || actual !== '[undefined]');
               const testFirstLine =
                 tcase.range &&
                 new vscode.Location(
@@ -238,12 +244,17 @@ export async function scanTestOutput(
               enqueueExitBlocker(
                 (async () => {
                   const location = await tryDeriveLocation(rawErr);
-                  let message: vscode.TestMessage;
+                  let message: vscode.TestMessage2;
 
                   if (hasDiff) {
-                    message = new vscode.TestMessage(tryMakeMarkdown(err));
+                    message = new vscode.TestMessage2(tryMakeMarkdown(err));
                     message.actualOutput = outputToString(actual);
                     message.expectedOutput = outputToString(expected);
+                    if (snapshotPath) {
+                      message.contextValue = 'isSelfhostSnapshotMessage';
+                      message.expectedOutput += snapshotComment + snapshotPath;
+                    }
+
                     attachTestMessageMetadata(message, {
                       expectedValue: expectedJSON,
                       actualValue: actualJSON,

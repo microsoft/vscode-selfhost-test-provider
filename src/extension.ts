@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
+import { registerSnapshotUpdate } from './snapshot';
 import { scanTestOutput } from './testOutputScanner';
 import {
   clearFileDiagnostics,
@@ -175,10 +176,24 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   context.subscriptions.push(
+    ctrl,
+    fileChangedEmitter.event(({ uri, removed }) => {
+      if (!removed) {
+        const node = getOrCreateFile(ctrl, uri);
+        if (node) {
+          ctrl.invalidateTestResults();
+        }
+      }
+    }),
     vscode.workspace.onDidOpenTextDocument(updateNodeForDocument),
     vscode.workspace.onDidChangeTextDocument(e => updateNodeForDocument(e.document)),
+    registerSnapshotUpdate(ctrl),
     new FailingDeepStrictEqualAssertFixer()
   );
+}
+
+export function deactivate() {
+  // no-op
 }
 
 function getOrCreateFile(
