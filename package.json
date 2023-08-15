@@ -3,8 +3,39 @@
   "displayName": "VS Code Selfhost Test Provider",
   "description": "Test provider for the VS Code project",
   "enabledApiProposals": [
-    "testObserver"
+    "testObserver",
+    "testMessageContextValue"
   ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "selfhost-test-provider.updateSnapshot",
+        "title": "Update Snapshot",
+        "icon": "$(merge)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "selfhost-test-provider.updateSnapshot",
+          "when": "false"
+        }
+      ],
+      "testing/message/context": [
+        {
+          "command": "selfhost-test-provider.updateSnapshot",
+          "group": "inline@1",
+          "when": "testMessage == isSelfhostSnapshotMessage && !testResultOutdated"
+        }
+      ],
+      "testing/message/content": [
+        {
+          "command": "selfhost-test-provider.updateSnapshot",
+          "when": "testMessage == isSelfhostSnapshotMessage && !testResultOutdated"
+        }
+      ]
+    }
+  },
   "icon": "icon.png",
   "version": "0.3.15",
   "publisher": "ms-vscode",
