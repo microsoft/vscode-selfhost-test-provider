@@ -125,6 +125,8 @@ export class TestOutputScanner implements vscode.Disposable {
   };
 }
 
+type QueuedOutput = string | [string, vscode.Location | undefined, vscode.TestItem | undefined];
+
 export async function scanTestOutput(
   tests: Map<string, vscode.TestItem>,
   task: vscode.TestRun,
@@ -133,6 +135,17 @@ export async function scanTestOutput(
 ): Promise<void> {
   const exitBlockers: Set<Promise<unknown>> = new Set();
   const skippedTests = new Set(tests.values());
+  const store = new SourceMapStore();
+  let outputQueue = Promise.resolve();
+  const enqueueOutput = (fn: QueuedOutput | (() => Promise<QueuedOutput>)) => {
+    exitBlockers.delete(outputQueue);
+    outputQueue = outputQueue.finally(async () => {
+      const r = typeof fn === 'function' ? await fn() : fn;
+      typeof r === 'string' ? task.appendOutput(r) : task.appendOutput(...r);
+    });
+    exitBlockers.add(outputQueue);
+    return outputQueue;
+  };
   const enqueueExitBlocker = <T>(prom: Promise<T>): Promise<T> => {
     exitBlockers.add(prom);
     prom.finally(() => exitBlockers.delete(prom));
@@ -154,23 +167,28 @@ export async function scanTestOutput(
 
       let currentTest: vscode.TestItem | undefined;
 
-      const defaultAppend = (str: string) => task.appendOutput(str + crlf, undefined, currentTest);
-
       scanner.onRunnerError(err => {
-        defaultAppend(err);
+        enqueueOutput(err + crlf);
         resolve();
       });
 
       scanner.onOtherOutput(str => {
         const match = spdlogRe.exec(str);
         if (!match) {
-          return defaultAppend(str);
+          enqueueOutput(str + crlf);
+          return;
         }
 
-        enqueueExitBlocker(
-          getSourceLocation(match[2], Number(match[3]))
-            .then(location => task.appendOutput(match[1] + crlf, location, currentTest))
-            .catch(() => defaultAppend(str))
+        const logLocation = store.getSourceLocation(match[2], Number(match[3]));
+        const logContents = replaceAllLocations(store, match[1]);
+        const test = currentTest;
+
+        enqueueOutput(() =>
+          Promise.all([logLocation, logContents]).then(([location, contents]) => [
+            contents + crlf,
+            location,
+            test,
+          ])
         );
       });
 
@@ -188,7 +206,7 @@ export async function scanTestOutput(
             {
               const title = evt[1].fullTitle;
               const tcase = tests.get(title);
-              task.appendOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
+              enqueueOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
               if (tcase) {
                 lastTest = tcase;
                 task.passed(tcase, evt[1].duration);
@@ -215,10 +233,11 @@ export async function scanTestOutput(
                 tcase = lastTest ?? tests.values().next().value;
               }
 
-              task.appendOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
+              enqueueOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
               const rawErr = stack || err;
+              const locationsReplaced = replaceAllLocations(store, forceCRLF(rawErr));
               if (rawErr) {
-                task.appendOutput(forceCRLF(rawErr));
+                enqueueOutput(async () => [await locationsReplaced, undefined, tcase]);
               }
 
               if (!tcase) {
@@ -243,7 +262,7 @@ export async function scanTestOutput(
 
               enqueueExitBlocker(
                 (async () => {
-                  const location = await tryDeriveLocation(rawErr);
+                  const location = await tryDeriveStackLocation(store, rawErr, tcase!);
                   let message: vscode.TestMessage2;
 
                   if (hasDiff) {
@@ -260,7 +279,9 @@ export async function scanTestOutput(
                       actualValue: actualJSON,
                     });
                   } else {
-                    message = new vscode.TestMessage(stack ? await sourcemapStack(stack) : err);
+                    message = new vscode.TestMessage(
+                      stack ? await sourcemapStack(store, stack) : await locationsReplaced
+                    );
                   }
 
                   message.location = location ?? testFirstLine;
@@ -297,19 +318,19 @@ const crlf = '\r\n';
 
 const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
 
-const sourcemapStack = async (str: string) => {
+const sourcemapStack = async (store: SourceMapStore, str: string) => {
   locationRe.lastIndex = 0;
 
   const replacements = await Promise.all(
     [...str.matchAll(locationRe)].map(async match => {
-      const location = await deriveSourceLocation(match);
+      const location = await deriveSourceLocation(store, match);
       if (!location) {
         return;
       }
       return {
         from: match[0],
         to: location?.uri.with({
-          fragment: `L${location.range.start.line}:${location.range.start.character}`,
+          fragment: `L${location.range.start.line + 1}:${location.range.start.character + 1}`,
         }),
       };
     })
@@ -342,48 +363,127 @@ const tryMakeMarkdown = (message: string) => {
 const inlineSourcemapRe = /^\/\/# sourceMappingURL=data:application\/json;base64,(.+)/m;
 const sourceMapBiases = [GREATEST_LOWER_BOUND, LEAST_UPPER_BOUND] as const;
 
-async function getSourceLocation(fileUri: string, line: number, col = 1) {
-  let sourceMap: TraceMap;
-  try {
-    const contents = await getContentFromFilesystem(vscode.Uri.parse(fileUri));
-    const sourcemapMatch = inlineSourcemapRe.exec(contents);
-    if (!sourcemapMatch) {
-      return;
+class SourceMapStore {
+  private readonly cache = new Map</* file uri */ string, Promise<TraceMap | undefined>>();
+
+  async getSourceLocation(fileUri: string, line: number, col = 1) {
+    const sourceMap = await this.loadSourceMap(fileUri);
+    if (!sourceMap) {
+      return undefined;
     }
 
-    const decoded = base64Decode(sourcemapMatch[1]);
-    sourceMap = new TraceMap(decoded, fileUri);
-  } catch (e) {
-    console.warn(`Error parsing sourcemap for ${fileUri}: ${(e as Error).stack}`);
-    return;
-  }
-
-  for (const bias of sourceMapBiases) {
-    const position = originalPositionFor(sourceMap, { column: col - 1, line: line, bias });
-    if (position.line !== null && position.column !== null && position.source !== null) {
-      return new vscode.Location(
-        vscode.Uri.parse(position.source),
-        new vscode.Position(position.line - 1, position.column)
-      );
+    for (const bias of sourceMapBiases) {
+      const position = originalPositionFor(sourceMap, { column: col - 1, line: line, bias });
+      if (position.line !== null && position.column !== null && position.source !== null) {
+        return new vscode.Location(
+          vscode.Uri.parse(position.source),
+          new vscode.Position(position.line - 1, position.column)
+        );
+      }
     }
+
+    return undefined;
   }
 
-  return undefined;
+  private loadSourceMap(fileUri: string) {
+    const existing = this.cache.get(fileUri);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = (async () => {
+      try {
+        const contents = await getContentFromFilesystem(vscode.Uri.parse(fileUri));
+        const sourcemapMatch = inlineSourcemapRe.exec(contents);
+        if (!sourcemapMatch) {
+          return;
+        }
+
+        const decoded = base64Decode(sourcemapMatch[1]);
+        return new TraceMap(decoded, fileUri);
+      } catch (e) {
+        console.warn(`Error parsing sourcemap for ${fileUri}: ${(e as Error).stack}`);
+        return;
+      }
+    })();
+
+    this.cache.set(fileUri, promise);
+    return promise;
+  }
 }
 
 const locationRe = /(file:\/{3}.+):([0-9]+):([0-9]+)/g;
 
-async function tryDeriveLocation(stack: string) {
-  locationRe.lastIndex = 0;
-  const parts = locationRe.exec(stack);
-  if (!parts) {
-    return;
+async function replaceAllLocations(store: SourceMapStore, str: string) {
+  const output: (string | Promise<string>)[] = [];
+  let lastIndex = 0;
+
+  for (const match of str.matchAll(locationRe)) {
+    const locationPromise = deriveSourceLocation(store, match);
+    const startIndex = match.index || 0;
+    const endIndex = startIndex + match[0].length;
+
+    if (startIndex > lastIndex) {
+      output.push(str.substring(lastIndex, startIndex));
+    }
+
+    output.push(
+      locationPromise.then(location =>
+        location
+          ? `${location.uri}:${location.range.start.line + 1}:${location.range.start.character + 1}`
+          : match[0]
+      )
+    );
+
+    lastIndex = endIndex;
   }
 
-  return deriveSourceLocation(parts);
+  // Preserve the remaining string after the last match
+  if (lastIndex < str.length) {
+    output.push(str.substring(lastIndex));
+  }
+
+  const values = await Promise.all(output);
+  return values.join('');
 }
 
-async function deriveSourceLocation(parts: RegExpMatchArray) {
+async function tryDeriveStackLocation(
+  store: SourceMapStore,
+  stack: string,
+  tcase: vscode.TestItem
+) {
+  locationRe.lastIndex = 0;
+
+  return new Promise<vscode.Location | undefined>(resolve => {
+    const matches = [...stack.matchAll(locationRe)];
+    let todo = matches.length;
+    let best: undefined | { location: vscode.Location; i: number; score: number };
+    for (const [i, match] of matches.entries()) {
+      deriveSourceLocation(store, match)
+        .catch(() => undefined)
+        .then(location => {
+          if (location) {
+            let score = 0;
+            if (tcase.uri && tcase.uri.toString() === location.uri.toString()) {
+              score = 1;
+              if (tcase.range && tcase.range.contains(location?.range)) {
+                score = 2;
+              }
+            }
+            if (!best || score > best.score || (score === best.score && i < best.i)) {
+              best = { location, i, score };
+            }
+          }
+
+          if (!--todo) {
+            resolve(best?.location);
+          }
+        });
+    }
+  });
+}
+
+async function deriveSourceLocation(store: SourceMapStore, parts: RegExpMatchArray) {
   const [, fileUri, line, col] = parts;
-  return getSourceLocation(fileUri, Number(line), Number(col));
+  return store.getSourceLocation(fileUri, Number(line), Number(col));
 }
