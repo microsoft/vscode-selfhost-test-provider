@@ -175,7 +175,8 @@ export async function scanTestOutput(
       scanner.onOtherOutput(str => {
         const match = spdlogRe.exec(str);
         if (!match) {
-          return enqueueOutput(str + crlf);
+          enqueueOutput(str + crlf);
+          return;
         }
 
         const logLocation = store.getSourceLocation(match[2], Number(match[3]));
@@ -234,9 +235,9 @@ export async function scanTestOutput(
 
               enqueueOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
               const rawErr = stack || err;
+              const locationsReplaced = replaceAllLocations(store, forceCRLF(rawErr));
               if (rawErr) {
-                const str = replaceAllLocations(store, forceCRLF(rawErr));
-                enqueueOutput(async () => [await str, undefined, tcase]);
+                enqueueOutput(async () => [await locationsReplaced, undefined, tcase]);
               }
 
               if (!tcase) {
@@ -279,7 +280,7 @@ export async function scanTestOutput(
                     });
                   } else {
                     message = new vscode.TestMessage(
-                      stack ? await sourcemapStack(store, stack) : err
+                      stack ? await sourcemapStack(store, stack) : await locationsReplaced
                     );
                   }
 
@@ -329,7 +330,7 @@ const sourcemapStack = async (store: SourceMapStore, str: string) => {
       return {
         from: match[0],
         to: location?.uri.with({
-          fragment: `L${location.range.start.line}:${location.range.start.character}`,
+          fragment: `L${location.range.start.line + 1}:${location.range.start.character + 1}`,
         }),
       };
     })
