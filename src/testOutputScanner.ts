@@ -457,6 +457,10 @@ async function tryDeriveStackLocation(
   return new Promise<vscode.Location | undefined>(resolve => {
     const matches = [...stack.matchAll(locationRe)];
     let todo = matches.length;
+    if (todo === 0) {
+      return resolve(undefined);
+    }
+
     let best: undefined | { location: vscode.Location; i: number; score: number };
     for (const [i, match] of matches.entries()) {
       deriveSourceLocation(store, match)
