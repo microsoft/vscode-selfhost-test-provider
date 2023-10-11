@@ -15,10 +15,11 @@ import {
 } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
-const TEST_FILE_PATTERN = 'src/**/*.{test,integrationTest}.ts';
+const TEST_FILE_PATTERN = 'src/vs/**/*.{test,integrationTest}.ts';
 
 const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
-  uri.path.endsWith('.test.ts') || uri.path.endsWith('.integrationTest.ts')
+  (uri.path.endsWith('.test.ts') || uri.path.endsWith('.integrationTest.ts')) &&
+  uri.path.includes('/src/vs/')
     ? vscode.workspace.getWorkspaceFolder(uri)
     : undefined;
 
