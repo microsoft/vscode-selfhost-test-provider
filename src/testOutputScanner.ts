@@ -263,10 +263,10 @@ export async function scanTestOutput(
               enqueueExitBlocker(
                 (async () => {
                   const location = await tryDeriveStackLocation(store, rawErr, tcase!);
-                  let message: vscode.TestMessage2;
+                  let message: vscode.TestMessage;
 
                   if (hasDiff) {
-                    message = new vscode.TestMessage2(tryMakeMarkdown(err));
+                    message = new vscode.TestMessage(tryMakeMarkdown(err));
                     message.actualOutput = outputToString(actual);
                     message.expectedOutput = outputToString(expected);
                     if (snapshotPath) {
