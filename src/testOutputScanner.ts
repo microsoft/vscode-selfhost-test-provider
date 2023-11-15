@@ -229,7 +229,7 @@ export async function scanTestOutput(
               } = evt[1];
               let tcase = tests.get(id);
               // report failures on hook to the last-seen test, or first test if none run yet
-              if (!tcase && id.includes('hook for')) {
+              if (!tcase && (id.includes('hook for') || id.includes('hook in'))) {
                 tcase = lastTest ?? tests.values().next().value;
               }
 
