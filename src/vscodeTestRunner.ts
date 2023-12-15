@@ -39,7 +39,7 @@ export abstract class VSCodeTestRunner {
   public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
     const port = await this.findOpenPort();
     const baseConfiguration = vscode.workspace
-      .getConfiguration('launch')
+      .getConfiguration('launch', this.repoLocation)
       .get<vscode.DebugConfiguration[]>('configurations', [])
       .find(c => c.name === ATTACH_CONFIG_NAME);
 
