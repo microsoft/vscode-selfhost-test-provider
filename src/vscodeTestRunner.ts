@@ -8,7 +8,7 @@ import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { itemData, TestCase, TestFile, TestSuite } from './testTree';
+import { TestCase, TestFile, TestSuite, itemData } from './testTree';
 
 /**
  * From MDN
@@ -37,10 +37,20 @@ export abstract class VSCodeTestRunner {
   }
 
   public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
+    const port = await this.findOpenPort();
+    const baseConfiguration = vscode.workspace
+      .getConfiguration('launch', this.repoLocation)
+      .get<vscode.DebugConfiguration[]>('configurations', [])
+      .find(c => c.name === ATTACH_CONFIG_NAME);
+
+    if (!baseConfiguration) {
+      throw new Error(`Could not find launch configuration ${ATTACH_CONFIG_NAME}`);
+    }
+
     const server = this.createWaitServer();
     const args = [
       ...this.prepareArguments(baseArgs, filter),
-      '--remote-debugging-port=9222',
+      `--remote-debugging-port=${port}`,
       // for breakpoint freeze: https://github.com/microsoft/vscode/issues/122225#issuecomment-885377304
       '--js-flags="--regexp_interpret_all"',
       // for general runtime freezes: https://github.com/microsoft/vscode/issues/127861#issuecomment-904144910
@@ -84,7 +94,7 @@ export abstract class VSCodeTestRunner {
       },
     });
 
-    vscode.debug.startDebugging(this.repoLocation, ATTACH_CONFIG_NAME);
+    vscode.debug.startDebugging(this.repoLocation, { ...baseConfiguration, port });
 
     let exited = false;
     let rootSession: vscode.DebugSession | undefined;
@@ -110,6 +120,22 @@ export abstract class VSCodeTestRunner {
     });
 
     return new TestOutputScanner(cp, args);
+  }
+
+  private findOpenPort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = createServer();
+      server.listen(0, () => {
+        const address = server.address() as AddressInfo;
+        const port = address.port;
+        server.close(() => {
+          resolve(port);
+        });
+      });
+      server.on('error', (error: Error) => {
+        reject(error);
+      });
+    });
   }
 
   protected getEnvironment(): NodeJS.ProcessEnv {
