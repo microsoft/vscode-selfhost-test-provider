@@ -3,7 +3,8 @@
   "displayName": "VS Code Selfhost Test Provider",
   "description": "Test provider for the VS Code project",
   "enabledApiProposals": [
-    "testObserver"
+    "testObserver",
+    "testCoverage"
   ],
   "contributes": {
     "commands": [
@@ -36,10 +37,10 @@
     }
   },
   "icon": "icon.png",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "publisher": "ms-vscode",
   "engines": {
-    "vscode": "^1.59.0-20210722"
+    "vscode": "^1.86.0-20240105"
   },
   "categories": [
     "Other"
@@ -78,6 +79,7 @@
     "postinstall": "vscode-dts main && vscode-dts dev"
   },
   "devDependencies": {
+    "@types/istanbul-lib-coverage": "^2.0.6",
     "@types/node": "^18.11.11",
     "@types/split2": "^3.2.1",
     "@typescript-eslint/eslint-plugin": "^5.45.1",

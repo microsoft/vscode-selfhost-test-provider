@@ -10,9 +10,12 @@ import {
 } from '@jridgewell/trace-mapping';
 import styles from 'ansi-styles';
 import { ChildProcessWithoutNullStreams } from 'child_process';
+import { existsSync, promises as fs } from 'fs';
 import { decode as base64Decode } from 'js-base64';
+import * as path from 'path';
 import * as split from 'split2';
 import * as vscode from 'vscode';
+import { CoverageProvider } from './coverageProvider';
 import { attachTestMessageMetadata } from './metadata';
 import { snapshotComment } from './snapshot';
 import { getContentFromFilesystem } from './testTree';
@@ -71,7 +74,7 @@ export type MochaEventTuple =
 export class TestOutputScanner implements vscode.Disposable {
   protected mochaEventEmitter = new vscode.EventEmitter<MochaEventTuple>();
   protected outputEventEmitter = new vscode.EventEmitter<string>();
-  protected onErrorEmitter = new vscode.EventEmitter<string>();
+  protected onExitEmitter = new vscode.EventEmitter<string | undefined>();
 
   /**
    * Fired when a mocha event comes in.
@@ -86,13 +89,15 @@ export class TestOutputScanner implements vscode.Disposable {
   /**
    * Fired when the process encounters an error, or exits.
    */
-  public readonly onRunnerError = this.onErrorEmitter.event;
+  public readonly onRunnerExit = this.onExitEmitter.event;
 
   constructor(private readonly process: ChildProcessWithoutNullStreams, private args?: string[]) {
     process.stdout.pipe(split()).on('data', this.processData);
     process.stderr.pipe(split()).on('data', this.processData);
-    process.on('error', e => this.onErrorEmitter.fire(e.message));
-    process.on('exit', code => this.onErrorEmitter.fire(`Test process exited with code ${code}`));
+    process.on('error', e => this.onExitEmitter.fire(e.message));
+    process.on('exit', code =>
+      this.onExitEmitter.fire(code ? `Test process exited with code ${code}` : undefined)
+    );
   }
 
   /**
@@ -128,9 +133,11 @@ export class TestOutputScanner implements vscode.Disposable {
 type QueuedOutput = string | [string, vscode.Location | undefined, vscode.TestItem | undefined];
 
 export async function scanTestOutput(
+  repoLocation: vscode.WorkspaceFolder,
   tests: Map<string, vscode.TestItem>,
   task: vscode.TestRun,
   scanner: TestOutputScanner,
+  coverageDir: string | undefined,
   cancellation: vscode.CancellationToken
 ): Promise<void> {
   const exitBlockers: Set<Promise<unknown>> = new Set();
@@ -167,8 +174,10 @@ export async function scanTestOutput(
 
       let currentTest: vscode.TestItem | undefined;
 
-      scanner.onRunnerError(err => {
-        enqueueOutput(err + crlf);
+      scanner.onRunnerExit(err => {
+        if (err) {
+          enqueueOutput(err + crlf);
+        }
         resolve();
       });
 
@@ -291,12 +300,24 @@ export async function scanTestOutput(
             }
             break;
           case MochaEvent.End:
-            resolve();
+            // no-op, we wait until the process exits to ensure coverage is written out
             break;
         }
       });
     });
+
     await Promise.all([...exitBlockers]);
+
+    if (coverageDir) {
+      const coverageFile = path.join(coverageDir, 'coverage-final.json');
+      try {
+        if (coverageFile && existsSync(coverageFile)) {
+          await generateCoverage(task, coverageFile, store, repoLocation);
+        }
+      } finally {
+        await fs.rm(coverageDir, { recursive: true, force: true });
+      }
+    }
 
     // no tests? Possible crash, show output:
     if (!ranAnyTest) {
@@ -317,6 +338,21 @@ const spdlogRe = /"(.+)", source: (file:\/\/\/.*?)+ \(([0-9]+)\)/;
 const crlf = '\r\n';
 
 const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
+
+const generateCoverage = async (
+  task: vscode.TestRun,
+  coveragePath: string,
+  store: SourceMapStore,
+  repoLocation: vscode.WorkspaceFolder
+) => {
+  try {
+    const contents = await fs.readFile(coveragePath, 'utf8');
+    task.coverageProvider = new CoverageProvider(JSON.parse(contents), repoLocation, store);
+  } catch (e) {
+    vscode.window.showWarningMessage(`Failed to parse coverage file: ${e}`);
+    return;
+  }
+};
 
 const sourcemapStack = async (store: SourceMapStore, str: string) => {
   locationRe.lastIndex = 0;
@@ -363,7 +399,7 @@ const tryMakeMarkdown = (message: string) => {
 const inlineSourcemapRe = /^\/\/# sourceMappingURL=data:application\/json;base64,(.+)/m;
 const sourceMapBiases = [GREATEST_LOWER_BOUND, LEAST_UPPER_BOUND] as const;
 
-class SourceMapStore {
+export class SourceMapStore {
   private readonly cache = new Map</* file uri */ string, Promise<TraceMap | undefined>>();
 
   async getSourceLocation(fileUri: string, line: number, col = 1) {
@@ -376,13 +412,45 @@ class SourceMapStore {
       const position = originalPositionFor(sourceMap, { column: col - 1, line: line, bias });
       if (position.line !== null && position.column !== null && position.source !== null) {
         return new vscode.Location(
-          vscode.Uri.parse(position.source),
+          this.completeSourceMapUrl(sourceMap, position.source),
           new vscode.Position(position.line - 1, position.column)
         );
       }
     }
 
     return undefined;
+  }
+
+  async getSourceFile(compiledUri: string) {
+    const sourceMap = await this.loadSourceMap(compiledUri);
+    if (!sourceMap) {
+      return undefined;
+    }
+
+    if (sourceMap.sources[0]) {
+      return this.completeSourceMapUrl(sourceMap, sourceMap.sources[0]);
+    }
+
+    for (const bias of sourceMapBiases) {
+      const position = originalPositionFor(sourceMap, { column: 0, line: 1, bias });
+      if (position.source !== null) {
+        return this.completeSourceMapUrl(sourceMap, position.source);
+      }
+    }
+
+    return undefined;
+  }
+
+  private completeSourceMapUrl(sm: TraceMap, source: string) {
+    if (sm.sourceRoot) {
+      try {
+        return vscode.Uri.parse(new URL(source, sm.sourceRoot).toString());
+      } catch {
+        // ignored
+      }
+    }
+
+    return vscode.Uri.parse(source);
   }
 
   private loadSourceMap(fileUri: string) {

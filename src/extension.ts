@@ -2,6 +2,9 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
+import { randomBytes } from 'crypto';
+import { tmpdir } from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
 import { registerSnapshotUpdate } from './snapshot';
@@ -49,10 +52,9 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
-  let runQueue = Promise.resolve();
   const createRunHandler = (
     runnerCtor: { new (folder: vscode.WorkspaceFolder): VSCodeTestRunner },
-    debug: boolean,
+    kind: vscode.TestRunProfileKind,
     args: string[] = []
   ) => {
     const doTestRun = async (
@@ -71,14 +73,32 @@ export async function activate(context: vscode.ExtensionContext) {
         task.enqueued(test);
       }
 
-      return (runQueue = runQueue.then(async () => {
-        await scanTestOutput(
-          map,
-          task,
-          debug ? await runner.debug(args, req.include) : await runner.run(args, req.include),
-          cancellationToken
-        );
-      }));
+      let coverageDir: string | undefined;
+      let currentArgs = args;
+      if (kind === vscode.TestRunProfileKind.Coverage) {
+        coverageDir = path.join(tmpdir(), `vscode-test-coverage-${randomBytes(8).toString('hex')}`);
+        currentArgs = [
+          ...currentArgs,
+          '--coverage',
+          '--coveragePath',
+          coverageDir,
+          '--coverageFormats',
+          'json',
+          '--coverageFormats',
+          'html',
+        ];
+      }
+
+      return await scanTestOutput(
+        folder,
+        map,
+        task,
+        kind === vscode.TestRunProfileKind.Debug
+          ? await runner.debug(currentArgs, req.include)
+          : await runner.run(currentArgs, req.include),
+        coverageDir,
+        cancellationToken
+      );
     };
 
     return async (req: vscode.TestRunRequest, cancellationToken: vscode.CancellationToken) => {
@@ -127,7 +147,7 @@ export async function activate(context: vscode.ExtensionContext) {
   ctrl.createRunProfile(
     'Run in Electron',
     vscode.TestRunProfileKind.Run,
-    createRunHandler(PlatformTestRunner, false),
+    createRunHandler(PlatformTestRunner, vscode.TestRunProfileKind.Run),
     true,
     undefined,
     true
@@ -136,7 +156,16 @@ export async function activate(context: vscode.ExtensionContext) {
   ctrl.createRunProfile(
     'Debug in Electron',
     vscode.TestRunProfileKind.Debug,
-    createRunHandler(PlatformTestRunner, true),
+    createRunHandler(PlatformTestRunner, vscode.TestRunProfileKind.Run),
+    true,
+    undefined,
+    true
+  );
+
+  ctrl.createRunProfile(
+    'Coverage in Electron',
+    vscode.TestRunProfileKind.Coverage,
+    createRunHandler(PlatformTestRunner, vscode.TestRunProfileKind.Coverage),
     true,
     undefined,
     true
@@ -146,7 +175,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const cfg = ctrl.createRunProfile(
       `Run in ${name}`,
       vscode.TestRunProfileKind.Run,
-      createRunHandler(BrowserTestRunner, false, [' --browser', arg]),
+      createRunHandler(BrowserTestRunner, vscode.TestRunProfileKind.Run, [' --browser', arg]),
       undefined,
       undefined,
       true
@@ -157,7 +186,11 @@ export async function activate(context: vscode.ExtensionContext) {
     ctrl.createRunProfile(
       `Debug in ${name}`,
       vscode.TestRunProfileKind.Debug,
-      createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser']),
+      createRunHandler(BrowserTestRunner, vscode.TestRunProfileKind.Debug, [
+        '--browser',
+        arg,
+        '--debug-browser',
+      ]),
       undefined,
       undefined,
       true
