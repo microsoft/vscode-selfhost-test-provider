@@ -37,7 +37,7 @@
     }
   },
   "icon": "icon.png",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "publisher": "ms-vscode",
   "engines": {
     "vscode": "^1.59.0-20210722"
