@@ -156,7 +156,7 @@ export async function activate(context: vscode.ExtensionContext) {
   ctrl.createRunProfile(
     'Debug in Electron',
     vscode.TestRunProfileKind.Debug,
-    createRunHandler(PlatformTestRunner, vscode.TestRunProfileKind.Run),
+    createRunHandler(PlatformTestRunner, vscode.TestRunProfileKind.Debug),
     true,
     undefined,
     true
