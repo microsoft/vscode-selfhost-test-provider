@@ -43,16 +43,21 @@ export class CoverageProvider implements vscode.TestCoverageProvider<FileCoverag
         ]).then(([loc, ...branches]) => {
           if (!loc || branches.some(b => !b)) {
             // no-op
-          } else if (branches.length === 1) {
-            details.push(new vscode.StatementCoverage(file.original.b[key][0], branches[0]!));
           } else {
-            details.push(
-              new vscode.StatementCoverage(
-                file.original.s[key],
-                loc,
-                branches.map((b, i) => new vscode.BranchCoverage(file.original.b[key][i], b!))
-              )
-            );
+            let hits = 0;
+            const branchCoverage: vscode.BranchCoverage[] = [];
+            for (const [i, location] of branches.entries()) {
+              const branchHit = file.original.b[key][i];
+              hits += branchHit;
+              branchCoverage.push(
+                new vscode.BranchCoverage(
+                  branchHit,
+                  location!,
+                  branch.type === 'if' ? (i === 0 ? 'if' : 'else') : undefined
+                )
+              );
+            }
+            details.push(new vscode.StatementCoverage(hits, loc, branchCoverage));
           }
         })
       );
