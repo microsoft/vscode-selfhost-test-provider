@@ -90,7 +90,6 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       return await scanTestOutput(
-        folder,
         map,
         task,
         kind === vscode.TestRunProfileKind.Debug
