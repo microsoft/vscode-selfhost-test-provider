@@ -133,7 +133,6 @@ export class TestOutputScanner implements vscode.Disposable {
 type QueuedOutput = string | [string, vscode.Location | undefined, vscode.TestItem | undefined];
 
 export async function scanTestOutput(
-  repoLocation: vscode.WorkspaceFolder,
   tests: Map<string, vscode.TestItem>,
   task: vscode.TestRun,
   scanner: TestOutputScanner,
@@ -312,7 +311,7 @@ export async function scanTestOutput(
       const coverageFile = path.join(coverageDir, 'coverage-final.json');
       try {
         if (coverageFile && existsSync(coverageFile)) {
-          await generateCoverage(task, coverageFile, store, repoLocation);
+          await generateCoverage(task, coverageFile, store);
         }
       } finally {
         await fs.rm(coverageDir, { recursive: true, force: true });
@@ -342,12 +341,11 @@ const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
 const generateCoverage = async (
   task: vscode.TestRun,
   coveragePath: string,
-  store: SourceMapStore,
-  repoLocation: vscode.WorkspaceFolder
+  store: SourceMapStore
 ) => {
   try {
     const contents = await fs.readFile(coveragePath, 'utf8');
-    task.coverageProvider = new CoverageProvider(JSON.parse(contents), repoLocation, store);
+    task.coverageProvider = new CoverageProvider(JSON.parse(contents), store);
   } catch (e) {
     vscode.window.showWarningMessage(`Failed to parse coverage file: ${e}`);
     return;

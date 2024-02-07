@@ -79,7 +79,6 @@
     "postinstall": "vscode-dts main && vscode-dts dev"
   },
   "devDependencies": {
-    "@types/istanbul-lib-coverage": "^2.0.6",
     "@types/node": "^18.11.11",
     "@types/split2": "^3.2.1",
     "@typescript-eslint/eslint-plugin": "^5.45.1",
@@ -96,6 +95,7 @@
   "dependencies": {
     "@jridgewell/trace-mapping": "^0.3.17",
     "ansi-styles": "^6.2.1",
+    "istanbul-to-vscode": "^1.0.0",
     "js-base64": "^3.7.3",
     "split2": "^4.1.0",
     "typescript": "^4.9.3"
