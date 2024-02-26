@@ -95,7 +95,7 @@
   "dependencies": {
     "@jridgewell/trace-mapping": "^0.3.17",
     "ansi-styles": "^6.2.1",
-    "istanbul-to-vscode": "^1.0.0",
+    "istanbul-to-vscode": "^1.0.1",
     "js-base64": "^3.7.3",
     "split2": "^4.1.0",
     "typescript": "^4.9.3"
