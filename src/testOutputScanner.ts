@@ -205,7 +205,11 @@ export async function scanTestOutput(
           case MochaEvent.Start:
             break; // no-op
           case MochaEvent.TestStart:
-            currentTest = tests.get(evt[1].fullTitle)!;
+            currentTest = tests.get(evt[1].fullTitle);
+            if (!currentTest) {
+              console.warn(`Could not find test ${evt[1].fullTitle}`);
+              return;
+            }
             skippedTests.delete(currentTest);
             task.started(currentTest);
             ranAnyTest = true;
