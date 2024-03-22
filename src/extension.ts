@@ -6,15 +6,16 @@ import { randomBytes } from 'crypto';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { coverageContext } from './coverageProvider';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
 import { registerSnapshotUpdate } from './snapshot';
 import { scanTestOutput } from './testOutputScanner';
 import {
+  TestCase,
+  TestFile,
   clearFileDiagnostics,
   guessWorkspaceFolder,
   itemData,
-  TestCase,
-  TestFile,
 } from './testTree';
 import { BrowserTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
 
@@ -161,7 +162,7 @@ export async function activate(context: vscode.ExtensionContext) {
     true
   );
 
-  ctrl.createRunProfile(
+  const coverage = ctrl.createRunProfile(
     'Coverage in Electron',
     vscode.TestRunProfileKind.Coverage,
     createRunHandler(PlatformTestRunner, vscode.TestRunProfileKind.Coverage),
@@ -169,6 +170,8 @@ export async function activate(context: vscode.ExtensionContext) {
     undefined,
     true
   );
+
+  coverage.loadDetailedCoverage = coverageContext.loadDetailedCoverage;
 
   for (const [name, arg] of browserArgs) {
     const cfg = ctrl.createRunProfile(
