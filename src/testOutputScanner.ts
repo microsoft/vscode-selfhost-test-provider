@@ -10,12 +10,10 @@ import {
 } from '@jridgewell/trace-mapping';
 import styles from 'ansi-styles';
 import { ChildProcessWithoutNullStreams } from 'child_process';
-import { existsSync, promises as fs } from 'fs';
 import { decode as base64Decode } from 'js-base64';
-import * as path from 'path';
 import * as split from 'split2';
 import * as vscode from 'vscode';
-import { CoverageProvider } from './coverageProvider';
+import { coverageContext } from './coverageProvider';
 import { attachTestMessageMetadata } from './metadata';
 import { snapshotComment } from './snapshot';
 import { getContentFromFilesystem } from './testTree';
@@ -312,13 +310,15 @@ export async function scanTestOutput(
     await Promise.all([...exitBlockers]);
 
     if (coverageDir) {
-      const coverageFile = path.join(coverageDir, 'coverage-final.json');
       try {
-        if (coverageFile && existsSync(coverageFile)) {
-          await generateCoverage(task, coverageFile, store);
-        }
-      } finally {
-        await fs.rm(coverageDir, { recursive: true, force: true });
+        await coverageContext.apply(task, coverageDir, {
+          mapFileUri: uri => store.getSourceFile(uri.toString()),
+          mapLocation: (uri, position) =>
+            store.getSourceLocation(uri.toString(), position.line, position.character),
+        });
+      } catch (e) {
+        const msg = `Error loading coverage:\n\n${e}\n`;
+        task.appendOutput(msg.replace(/\n/g, crlf));
       }
     }
 
@@ -341,20 +341,6 @@ const spdlogRe = /"(.+)", source: (file:\/\/\/.*?)+ \(([0-9]+)\)/;
 const crlf = '\r\n';
 
 const forceCRLF = (str: string) => str.replace(/(?<!\r)\n/gm, '\r\n');
-
-const generateCoverage = async (
-  task: vscode.TestRun,
-  coveragePath: string,
-  store: SourceMapStore
-) => {
-  try {
-    const contents = await fs.readFile(coveragePath, 'utf8');
-    task.coverageProvider = new CoverageProvider(JSON.parse(contents), store);
-  } catch (e) {
-    vscode.window.showWarningMessage(`Failed to parse coverage file: ${e}`);
-    return;
-  }
-};
 
 const sourcemapStack = async (store: SourceMapStore, str: string) => {
   locationRe.lastIndex = 0;
@@ -411,7 +397,7 @@ export class SourceMapStore {
     }
 
     for (const bias of sourceMapBiases) {
-      const position = originalPositionFor(sourceMap, { column: col - 1, line: line, bias });
+      const position = originalPositionFor(sourceMap, { column: col, line: line + 1, bias });
       if (position.line !== null && position.column !== null && position.source !== null) {
         return new vscode.Location(
           this.completeSourceMapUrl(sourceMap, position.source),
